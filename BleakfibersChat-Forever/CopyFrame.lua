@@ -93,13 +93,20 @@ local function CreateURLDialog()
     editBox:SetAutoFocus(true)
     editBox:SetScript("OnEscapePressed", function() f:Hide() end)
     editBox:SetScript("OnEnterPressed", function() f:Hide() end)
+    editBox:SetScript("OnMouseUp", function(self)
+        self:HighlightText()
+    end)
     editBox:SetScript("OnEditFocusLost", function(self)
-        -- Keep selection active if still shown
         if f:IsShown() then
             self:HighlightText()
         end
     end)
     f.editBox = editBox
+
+    f:SetScript("OnShow", function(self)
+        self.editBox:SetFocus()
+        self.editBox:HighlightText()
+    end)
 
     -- Close Button (Top Right 'X')
     local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -182,11 +189,24 @@ local function CreateChatLogDialog()
     local scrollFrame = CreateFrame("ScrollFrame", "BleakfibersChatLogScrollFrame", inset, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", inset, "TOPLEFT", 6, -6)
     scrollFrame:SetPoint("BOTTOMRIGHT", inset, "BOTTOMRIGHT", -26, 6)
+    scrollFrame:EnableMouseWheel(true)
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local cur = self:GetVerticalScroll() or 0
+        local step = 36
+        if delta > 0 then
+            self:SetVerticalScroll(math.max(0, cur - step))
+        else
+            local maxScroll = self:GetVerticalScrollRange() or 0
+            self:SetVerticalScroll(math.min(maxScroll, cur + step))
+        end
+    end)
+    f.scrollFrame = scrollFrame
 
     -- ScrollChild with EditBox
     local scrollChild = CreateFrame("Frame", nil, scrollFrame)
     scrollChild:SetSize(520, 320)
     scrollFrame:SetScrollChild(scrollChild)
+    f.scrollChild = scrollChild
 
     local editBox = CreateFrame("EditBox", nil, scrollChild)
     editBox:SetPoint("TOPLEFT", scrollChild, "TOPLEFT", 0, 0)
@@ -199,7 +219,11 @@ local function CreateChatLogDialog()
     editBox:SetScript("OnEscapePressed", function() f:Hide() end)
     editBox:SetScript("OnTextChanged", function(self)
         -- Adjust child height dynamically based on content
-        scrollChild:SetHeight(math.max(self:GetHeight() + 20, 300))
+        local h = math.max(self:GetHeight() + 24, scrollFrame:GetHeight() or 300)
+        scrollChild:SetHeight(h)
+        if scrollFrame.UpdateScrollChildRect then
+            scrollFrame:UpdateScrollChildRect()
+        end
     end)
     f.editBox = editBox
 
@@ -208,6 +232,11 @@ local function CreateChatLogDialog()
         if w and w > 0 then
             scrollChild:SetWidth(w)
             editBox:SetWidth(w)
+            local childH = math.max(editBox:GetHeight() + 24, h or 300)
+            scrollChild:SetHeight(childH)
+            if self.UpdateScrollChildRect then
+                self:UpdateScrollChildRect()
+            end
         end
     end)
 
@@ -261,7 +290,11 @@ local function CleanMessageFormatting(str)
     local clean = str:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
     -- Strip textures: |T...|t
     clean = clean:gsub("|T.-|t", "")
-    -- Strip hyperlinks: |H...|h[text]|h -> text
+    -- Strip player links cleanly: |Hplayer:...|h[PlayerName]|h -> PlayerName
+    clean = clean:gsub("|Hplayer:.-|h%[(.-)%]|h", "%1")
+    -- Strip URL hyperlinks to raw URL for plain-text pasting
+    clean = clean:gsub("|Hurl:(.-)|h.-|h", "%1")
+    -- Strip other hyperlinks (items, spells, quests, achievements): |H...|h[text]|h -> [text]
     clean = clean:gsub("|H.-|h%[(.-)%]|h", "[%1]")
     clean = clean:gsub("|H.-|h(.-)|h", "%1")
     return clean
@@ -307,7 +340,18 @@ function CopyFrame:ShowChatLog(chatFrame, textLines)
 
     f.editBox:SetText(formatted)
     f.countText:SetText(string.format("%d message lines", lineCount))
+
+    if f.scrollChild and f.scrollFrame then
+        local childH = math.max(f.editBox:GetHeight() + 24, f.scrollFrame:GetHeight() or 300)
+        f.scrollChild:SetHeight(childH)
+        if f.scrollFrame.UpdateScrollChildRect then
+            f.scrollFrame:UpdateScrollChildRect()
+        end
+        f.scrollFrame:SetVerticalScroll(0)
+    end
+
     f:Show()
     f.editBox:SetFocus()
     f.editBox:HighlightText()
 end
+

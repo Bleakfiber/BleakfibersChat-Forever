@@ -43,6 +43,7 @@ local DB_DEFAULTS = {
 
         -- EditBox & Frame Layout
         editBoxPosition = "BOTTOM",  -- "BOTTOM" or "TOP"
+        showCopyButton = true,       -- Show copy button on chat frames
         hideChatButtons = true,      -- Hides chat menu, voice, channel buttons
         hideScrollButtons = true,    -- Hides bottom scroll buttons
         enableMouseWheel = true,     -- Mousewheel scroll (Shift+Wheel to jump)
@@ -272,3 +273,4 @@ SlashCmdList["BLEAKFIBERSCHAT"] = function(msg)
         print("  |cffffd100/bfchat history clear|r - Clear stored history")
     end
 end
+

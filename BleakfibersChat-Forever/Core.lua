@@ -160,34 +160,130 @@ end
 --[[-----------------------------------------------------------------------------
     URL Detection & Clickable Hyperlinks
 -------------------------------------------------------------------------------]]
--- URL Regex Matching Patterns
-local URL_PATTERNS = {
-    -- Protocols: http://, https://, ftp://
-    "(https?://%S+)",
-    "(ftp://%S+)",
-    -- WWW prefix: www.example.com
-    "(www%.[%w_%.%+%-]+%.%a%a+/%S*)",
-    "(www%.[%w_%.%+%-]+%.%a%a+)",
-    -- Discord invitations
-    "(discord%.gg/%S+)",
-    "(discordapp%.com/invite/%S+)",
-    -- Common domains with path
-    "([%w_%.%+%-]+%.(?:com|org|net|io|gg|tv|de|ru|uk|ca|me|app)/%S+)",
+local COMMON_TLDS = {
+    ["com"] = true, ["org"] = true, ["net"] = true, ["edu"] = true, ["gov"] = true,
+    ["io"] = true, ["gg"] = true, ["tv"] = true, ["me"] = true, ["app"] = true,
+    ["dev"] = true, ["co"] = true, ["uk"] = true, ["de"] = true, ["ca"] = true,
+    ["ru"] = true, ["fr"] = true, ["eu"] = true, ["info"] = true, ["biz"] = true,
 }
 
-local function FormatURL(url)
-    return string.format("|cff33ccff|Hurl:%s|h[%s]|h|r", url, url)
+local function IsURL(token)
+    if not token or token == "" then return false end
+    if token:find("@") then return false end -- Exclude emails
+    if token:find("^https?://") or token:find("^ftp://") then
+        return true
+    end
+    if token:find("^www%.[%w_%-%.]+%.%a%a+") then
+        return true
+    end
+    if token:find("^discord%.gg/%S+") or token:find("^discordapp%.com/invite/%S+") then
+        return true
+    end
+    local host = token:match("^([%w_%-%.]+)/.*$") or token
+    local domain, tld = host:match("^([%w_%-%.]+)%.(%a+)$")
+    if domain and tld then
+        if COMMON_TLDS[tld:lower()] then
+            return true
+        end
+    end
+    return false
+end
+
+local function StripPunctuation(token)
+    local prefix = ""
+    local suffix = ""
+    
+    while #token > 0 do
+        local c = token:sub(1, 1)
+        if c == "(" or c == "[" or c == "{" or c == '"' or c == "'" or c == "<" then
+            prefix = prefix .. c
+            token = token:sub(2)
+        else
+            break
+        end
+    end
+    
+    while #token > 0 do
+        local c = token:sub(-1, -1)
+        if c == ")" or c == "]" or c == "}" or c == ">" or c == '"' or c == "'"
+           or c == "!" or c == "?" or c == "," or c == "." or c == ";" or c == ":" then
+            if c == ")" and token:find("%(") then
+                break
+            end
+            if c == "]" and token:find("%[") then
+                break
+            end
+            suffix = c .. suffix
+            token = token:sub(1, -2)
+        else
+            break
+        end
+    end
+    
+    return prefix, token, suffix
+end
+
+function BFC:GetUrlColorHex()
+    local db = self.db or {}
+    local col = db.urlColor or { r = 0.20, g = 0.85, b = 1.00 }
+    return string.format("%02x%02x%02x", math.floor((col.r or 0.20) * 255 + 0.5), math.floor((col.g or 0.85) * 255 + 0.5), math.floor((col.b or 1.00) * 255 + 0.5))
+end
+
+function BFC:FormatUrlsInText(message)
+    if not message or message == "" then return message end
+
+    -- Step 1: Preserve existing hyperlinks (|H...|h...|h)
+    local links = {}
+    local preserved = message:gsub("(|H.-|h.-|h)", function(link)
+        local idx = #links + 1
+        links[idx] = link
+        return string.format("\001BFC_LINK_%d\002", idx)
+    end)
+
+    local urlHex = self:GetUrlColorHex()
+
+    -- Step 2: Scan whitespace-delimited tokens
+    local processed = preserved:gsub("(%S+)", function(word)
+        if word:find("^\001BFC_LINK_") then
+            return word
+        end
+
+        local leadColor, coreWord = word:match("^(|c%x%x%x%x%x%x%x%x)(.*)$")
+        if not leadColor then
+            coreWord = word
+            leadColor = ""
+        end
+
+        local trailR = ""
+        if coreWord:sub(-2) == "|r" then
+            trailR = "|r"
+            coreWord = coreWord:sub(1, -3)
+        end
+
+        local prefix, token, suffix = StripPunctuation(coreWord)
+        if token and IsURL(token) then
+            local formatted = string.format("|cff%s|Hurl:%s|h[%s]|h|r", urlHex, token, token)
+            return leadColor .. prefix .. formatted .. suffix .. trailR
+        end
+
+        return word
+    end)
+
+    -- Step 3: Restore preserved hyperlinks
+    local restored = processed:gsub("\001BFC_LINK_(%d+)\002", function(idx)
+        return links[tonumber(idx)] or ""
+    end)
+
+    return restored
 end
 
 function BFC:ProcessMessageText(message, sender, guid)
-    if not message or message == "" then return message end
+    if type(message) ~= "string" or message == "" then return message end
     local db = self.db or {}
 
     -- 1. URL Replacement
     if db.enableUrlLinks then
-        for _, pattern in ipairs(URL_PATTERNS) do
-            message = message:gsub(pattern, FormatURL)
-        end
+        message = self:FormatUrlsInText(message)
     end
 
     -- 2. Channel Name Shortening
@@ -230,12 +326,37 @@ function BFC:SetupUrlDetection()
     SetItemRef = function(link, text, button, chatFrame)
         if link and link:sub(1, 4) == "url:" then
             local url = link:sub(5)
+            if IsShiftKeyDown() then
+                local editBox = ChatEdit_GetActiveWindow and ChatEdit_GetActiveWindow()
+                if not editBox and LAST_ACTIVE_CHAT_EDIT_BOX and LAST_ACTIVE_CHAT_EDIT_BOX:IsShown() then
+                    editBox = LAST_ACTIVE_CHAT_EDIT_BOX
+                end
+                if editBox and editBox:IsShown() then
+                    editBox:Insert(url)
+                    return
+                end
+            end
             if BFC.CopyFrame and BFC.CopyFrame.ShowURL then
                 BFC.CopyFrame:ShowURL(url)
             end
             return
         end
         return orig_SetItemRef(link, text, button, chatFrame)
+    end
+
+    if ChatFrame_OnHyperlinkShow and not self._hookedHyperlinkShow then
+        hooksecurefunc("ChatFrame_OnHyperlinkShow", function(chatFrame, link, text, button)
+            if link and link:sub(1, 4) == "url:" then
+                local url = link:sub(5)
+                if not IsShiftKeyDown() and BFC.CopyFrame and BFC.CopyFrame.ShowURL then
+                    local urlDlg = _G["BleakfibersChat_URLDialog"]
+                    if not (urlDlg and urlDlg:IsShown()) then
+                        BFC.CopyFrame:ShowURL(url)
+                    end
+                end
+            end
+        end)
+        self._hookedHyperlinkShow = true
     end
 end
 
@@ -246,42 +367,149 @@ local copyButtons = {}
 
 local function CreateCopyButton(chatFrame)
     local frameName = chatFrame:GetName()
-    if not frameName or copyButtons[frameName] then return end
+    if not frameName then return end
 
-    local btn = CreateFrame("Button", frameName .. "BleakCopyBtn", chatFrame)
-    btn:SetSize(16, 16)
-    btn:SetPoint("TOPRIGHT", chatFrame, "TOPRIGHT", -2, -2)
-    btn:SetAlpha(0.35)
+    local btn = copyButtons[frameName]
+    if not btn then
+        btn = CreateFrame("Button", frameName .. "BleakCopyBtn", chatFrame)
+        btn:SetSize(16, 16)
+        btn:SetPoint("TOPRIGHT", chatFrame, "TOPRIGHT", -2, -2)
+        btn:SetAlpha(0.35)
 
-    local icon = btn:CreateTexture(nil, "ARTWORK")
-    icon:SetAllPoints(btn)
-    icon:SetTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
-    btn.icon = icon
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetAllPoints(btn)
+        icon:SetTexture("Interface\\Buttons\\UI-GuildButton-PublicNote-Up")
+        btn.icon = icon
 
-    btn:SetScript("OnEnter", function(self)
-        self:SetAlpha(1.0)
-        GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
-        GameTooltip:ClearLines()
-        GameTooltip:AddLine("|cffffd100Copy Chat Log|r", 1, 1, 1)
-        GameTooltip:AddLine("Click to open plain-text copy window for this chat tab.", 0.8, 0.8, 0.8, true)
-        GameTooltip:Show()
-    end)
-    btn:SetScript("OnLeave", function(self)
-        self:SetAlpha(0.35)
-        GameTooltip:Hide()
-    end)
-    btn:SetScript("OnClick", function()
-        if BFC.CopyFrame and BFC.CopyFrame.ShowChatLog then
-            BFC.CopyFrame:ShowChatLog(chatFrame)
+        btn:SetScript("OnEnter", function(self)
+            self:SetAlpha(1.0)
+            GameTooltip:SetOwner(self, "ANCHOR_TOPLEFT")
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine("|cffffd100Copy Chat Log|r", 1, 1, 1)
+            GameTooltip:AddLine("Click to open plain-text copy window for this chat tab.", 0.8, 0.8, 0.8, true)
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function(self)
+            self:SetAlpha(0.35)
+            GameTooltip:Hide()
+        end)
+        btn:SetScript("OnClick", function()
+            if BFC.CopyFrame and BFC.CopyFrame.ShowChatLog then
+                BFC.CopyFrame:ShowChatLog(chatFrame)
+            end
+        end)
+
+        copyButtons[frameName] = btn
+    end
+
+    local db = BFC.db or {}
+    if db.showCopyButton == false then
+        btn:Hide()
+    else
+        btn:Show()
+    end
+end
+
+function BFC:InitChatFrame(cf)
+    if not cf then return end
+    local fName = cf:GetName()
+    if not fName then return end
+
+    local db = self.db or {}
+
+    -- Unclamp frame to allow flush screen placement
+    if db.unclampFromScreen then
+        cf:SetClampedToScreen(false)
+    end
+
+    -- Mousewheel scrolling (Smooth + Shift jump)
+    if db.enableMouseWheel then
+        cf:EnableMouseWheel(true)
+        cf:SetScript("OnMouseWheel", function(self, delta)
+            if delta > 0 then
+                if IsShiftKeyDown() then
+                    self:ScrollToTop()
+                else
+                    self:ScrollUp()
+                end
+            elseif delta < 0 then
+                if IsShiftKeyDown() then
+                    self:ScrollToBottom()
+                else
+                    self:ScrollDown()
+                end
+            end
+        end)
+    end
+
+    -- Hide scroll up/down/bottom buttons if requested
+    if db.hideScrollButtons then
+        local bottomBtn = _G[fName .. "BottomButton"]
+        if bottomBtn then
+            bottomBtn:Hide()
+            bottomBtn:HookScript("OnShow", bottomBtn.Hide)
         end
-    end)
+        local upBtn = _G[fName .. "UpButton"]
+        if upBtn then
+            upBtn:Hide()
+            upBtn:HookScript("OnShow", upBtn.Hide)
+        end
+        local downBtn = _G[fName .. "DownButton"]
+        if downBtn then
+            downBtn:Hide()
+            downBtn:HookScript("OnShow", downBtn.Hide)
+        end
+    end
 
-    copyButtons[frameName] = btn
+    -- Typography
+    self:ApplyFrameTypography(cf)
+
+    -- In-memory session tracking & Hook AddMessage
+    self.sessionHistory[fName] = self.sessionHistory[fName] or {}
+
+    if not cf._bfcAddMessageHooked then
+        local origAddMessage = cf.AddMessage
+        cf.AddMessage = function(frame, msg, r, g, b, id, ...)
+            -- Run text formatting pipeline
+            local processed = BFC:ProcessMessageText(msg)
+
+            -- Record to session memory
+            table.insert(BFC.sessionHistory[fName], processed)
+            if #BFC.sessionHistory[fName] > 500 then
+                table.remove(BFC.sessionHistory[fName], 1)
+            end
+
+            -- Record to persistent SavedVariables if enabled and not currently restoring
+            if not BFC.isRestoringHistory and BFC.db and BFC.db.enableChatHistory then
+                local charStore = BFC.historyDB[BFC.charKey]
+                if charStore and charStore.frames then
+                    charStore.frames[fName] = charStore.frames[fName] or {}
+                    local frameList = charStore.frames[fName]
+                    table.insert(frameList, { text = processed, r = r, g = g, b = b, time = time() })
+                    local maxLines = BFC.db.chatHistoryLines or 200
+                    while #frameList > maxLines do
+                        table.remove(frameList, 1)
+                    end
+                end
+            end
+
+            return origAddMessage(frame, processed, r, g, b, id, ...)
+        end
+        cf._bfcAddMessageHooked = true
+    end
+
+    -- Add/Update Copy Button
+    CreateCopyButton(cf)
+
+    -- Position edit box
+    local eb = _G[fName .. "EditBox"]
+    if eb then
+        self:PositionEditBox(eb, cf)
+    end
 end
 
 function BFC:SetupChatFrames()
     local db = self.db or {}
-    local numWindows = NUM_CHAT_WINDOWS or 7
 
     -- Suppress Blizzard Intrusive Buttons
     if db.hideChatButtons then
@@ -295,94 +523,47 @@ function BFC:SetupChatFrames()
         end
     end
 
-    for i = 1, numWindows do
-        local cf = _G["ChatFrame" .. i]
-        if cf then
-            -- Unclamp frame to allow flush screen placement
-            if db.unclampFromScreen then
-                cf:SetClampedToScreen(false)
+    -- Initialize all registered chat frames
+    if CHAT_FRAMES and #CHAT_FRAMES > 0 then
+        for _, name in ipairs(CHAT_FRAMES) do
+            local cf = _G[name]
+            if cf then
+                self:InitChatFrame(cf)
             end
-
-            -- Mousewheel scrolling (Smooth + Shift jump)
-            if db.enableMouseWheel then
-                cf:EnableMouseWheel(true)
-                cf:SetScript("OnMouseWheel", function(self, delta)
-                    if delta > 0 then
-                        if IsShiftKeyDown() then
-                            self:ScrollToTop()
-                        else
-                            self:ScrollUp()
-                        end
-                    elseif delta < 0 then
-                        if IsShiftKeyDown() then
-                            self:ScrollToBottom()
-                        else
-                            self:ScrollDown()
-                        end
-                    end
-                end)
-            end
-
-            -- Hide scroll up/down/bottom buttons if requested
-            if db.hideScrollButtons then
-                local bottomBtn = _G["ChatFrame" .. i .. "BottomButton"]
-                if bottomBtn then
-                    bottomBtn:Hide()
-                    bottomBtn:HookScript("OnShow", bottomBtn.Hide)
-                end
-                local upBtn = _G["ChatFrame" .. i .. "UpButton"]
-                if upBtn then
-                    upBtn:Hide()
-                    upBtn:HookScript("OnShow", upBtn.Hide)
-                end
-                local downBtn = _G["ChatFrame" .. i .. "DownButton"]
-                if downBtn then
-                    downBtn:Hide()
-                    downBtn:HookScript("OnShow", downBtn.Hide)
-                end
-            end
-
-            -- Typography
-            self:ApplyFrameTypography(cf)
-
-            -- In-memory session tracking & Hook AddMessage
-            local fName = cf:GetName()
-            self.sessionHistory[fName] = self.sessionHistory[fName] or {}
-
-            if not cf._bfcAddMessageHooked then
-                local origAddMessage = cf.AddMessage
-                cf.AddMessage = function(frame, msg, r, g, b, id, ...)
-                    -- Run text formatting pipeline
-                    local processed = BFC:ProcessMessageText(msg)
-
-                    -- Record to session memory
-                    table.insert(BFC.sessionHistory[fName], processed)
-                    if #BFC.sessionHistory[fName] > 500 then
-                        table.remove(BFC.sessionHistory[fName], 1)
-                    end
-
-                    -- Record to persistent SavedVariables if enabled and not currently restoring
-                    if not BFC.isRestoringHistory and BFC.db and BFC.db.enableChatHistory then
-                        local charStore = BFC.historyDB[BFC.charKey]
-                        if charStore and charStore.frames then
-                            charStore.frames[fName] = charStore.frames[fName] or {}
-                            local frameList = charStore.frames[fName]
-                            table.insert(frameList, { text = processed, r = r, g = g, b = b, time = time() })
-                            local maxLines = BFC.db.chatHistoryLines or 200
-                            while #frameList > maxLines do
-                                table.remove(frameList, 1)
-                            end
-                        end
-                    end
-
-                    return origAddMessage(frame, processed, r, g, b, id, ...)
-                end
-                cf._bfcAddMessageHooked = true
-            end
-
-            -- Add Copy Button to tab
-            CreateCopyButton(cf)
         end
+    else
+        local numWindows = NUM_CHAT_WINDOWS or 7
+        for i = 1, numWindows do
+            local cf = _G["ChatFrame" .. i]
+            if cf then
+                self:InitChatFrame(cf)
+            end
+        end
+    end
+
+    -- Hook temporary and newly created chat frames
+    if FCF_OpenTemporaryWindow and not self._hookedOpenTemp then
+        hooksecurefunc("FCF_OpenTemporaryWindow", function(chatType, chatTarget)
+            for _, name in ipairs(CHAT_FRAMES or {}) do
+                local cf = _G[name]
+                if cf then
+                    BFC:InitChatFrame(cf)
+                end
+            end
+        end)
+        self._hookedOpenTemp = true
+    end
+
+    if FCF_OpenNewWindow and not self._hookedOpenNew then
+        hooksecurefunc("FCF_OpenNewWindow", function(name)
+            for _, frameName in ipairs(CHAT_FRAMES or {}) do
+                local cf = _G[frameName]
+                if cf then
+                    BFC:InitChatFrame(cf)
+                end
+            end
+        end)
+        self._hookedOpenNew = true
     end
 end
 
@@ -436,9 +617,24 @@ end
 -- Public extraction helper for CopyFrame
 function BFC:GetChatFrameMessages(chatFrame)
     local fName = chatFrame and chatFrame.GetName and chatFrame:GetName()
-    if fName and self.sessionHistory[fName] then
+    if not fName then return {} end
+
+    if self.sessionHistory[fName] and #self.sessionHistory[fName] > 0 then
         return self.sessionHistory[fName]
     end
+
+    -- Fallback to persistent SavedVariables history if session is empty
+    if self.historyDB and self.charKey and self.historyDB[self.charKey] then
+        local frames = self.historyDB[self.charKey].frames
+        if frames and frames[fName] and #frames[fName] > 0 then
+            local lines = {}
+            for _, entry in ipairs(frames[fName]) do
+                table.insert(lines, entry.text)
+            end
+            return lines
+        end
+    end
+
     return {}
 end
 
@@ -499,3 +695,4 @@ function BFC:ApplySettings()
     self:SetupChatFrames()
     self:SetupEditBox()
 end
+

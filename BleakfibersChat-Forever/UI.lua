@@ -378,7 +378,7 @@ function UI:CreateDropdown(parent, name, labelText, items, x, y, width, getFunc,
 
     local arrow = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     arrow:SetPoint("RIGHT", btn, "RIGHT", -6, 0)
-    arrow:SetText("|cFFFFD100▼|r")
+    arrow:SetText("|cFFFFD100v|r")
 
     local function GetItemsList()
         if type(items) == "function" then
@@ -488,7 +488,7 @@ function UI:CreateDropdown(parent, name, labelText, items, x, y, width, getFunc,
             b.isActive = isActive
             if isActive then
                 selectedIndex = i
-                b.text:SetText("|cFFFFD100✔ |r" .. itm.text)
+                b.text:SetText("|cFFFFD100* |r" .. itm.text)
                 b:SetBackdropColor(0.22, 0.19, 0.12, 0.95)
                 b:SetBackdropBorderColor(unpack(COLORS.goldBorder))
             else
@@ -638,6 +638,59 @@ function UI:CreateEditBox(parent, name, labelText, x, y, width, getFunc, setFunc
 end
 
 --[[-----------------------------------------------------------------------------
+    Widget Factory: Color Picker
+-------------------------------------------------------------------------------]]
+function UI:CreateColorPicker(parent, name, labelText, x, y, getFunc, setFunc)
+    local frame = CreateFrame("Frame", name, parent)
+    frame:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    frame:SetSize(180, 26)
+
+    local swatch = CreateFrame("Button", name .. "Swatch", frame, BACKDROP_TEMPLATE)
+    swatch:SetSize(20, 20)
+    swatch:SetPoint("LEFT", frame, "LEFT", 0, 0)
+    swatch:SetBackdrop(INSET_BACKDROP)
+    swatch:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+
+    local colorTex = swatch:CreateTexture(nil, "ARTWORK")
+    colorTex:SetPoint("TOPLEFT", swatch, "TOPLEFT", 2, -2)
+    colorTex:SetPoint("BOTTOMRIGHT", swatch, "BOTTOMRIGHT", -2, 2)
+
+    local cur = getFunc and getFunc() or { r = 1, g = 1, b = 1 }
+    colorTex:SetColorTexture(cur.r or 1, cur.g or 1, cur.b or 1, 1)
+
+    local label = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("LEFT", swatch, "RIGHT", 8, 0)
+    label:SetText(labelText)
+
+    swatch:SetScript("OnClick", function()
+        local c = getFunc and getFunc() or { r = 1, g = 1, b = 1 }
+        ColorPickerFrame.func = function()
+            local r, g, b = ColorPickerFrame:GetColorRGB()
+            colorTex:SetColorTexture(r, g, b, 1)
+            if setFunc then setFunc({ r = r, g = g, b = b }) end
+        end
+        ColorPickerFrame.cancelFunc = function(prev)
+            colorTex:SetColorTexture(c.r, c.g, c.b, 1)
+            if setFunc then setFunc(c) end
+        end
+        ColorPickerFrame:SetColorRGB(c.r, c.g, c.b)
+        ColorPickerFrame.hasOpacity = false
+        ColorPickerFrame:Show()
+    end)
+
+    table.insert(registeredWidgets, {
+        type = "colorpicker",
+        frame = frame,
+        update = function()
+            local c = getFunc and getFunc() or { r = 1, g = 1, b = 1 }
+            colorTex:SetColorTexture(c.r or 1, c.g or 1, c.b or 1, 1)
+        end,
+    })
+
+    return frame
+end
+
+--[[-----------------------------------------------------------------------------
     Options Panel Layout (Tabbed & Responsive Reflow)
 -------------------------------------------------------------------------------]]
 function UI:BuildOptions(parentContainer, isMasterHub)
@@ -716,6 +769,13 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         end,
         "Automatically identifies web URLs in chat and turns them into clickable links that open a copy dialog."
     )
+    local cpUrlColor = self:CreateColorPicker(pGeneral, "BFC_CpUrlColor", "URL Accent Color", 16, 0,
+        function() return db.urlColor or { r = 0.20, g = 0.85, b = 1.00 } end,
+        function(v)
+            db.urlColor = v
+            if BFC.ApplySettings then BFC:ApplySettings() end
+        end
+    )
 
     local hWhispers = self:CreateSectionHeader(pGeneral, "Whispers & Tabs", 16, 0)
     local cbWhisperWindow = self:CreateCheckbox(pGeneral, "BFC_CbWhisperWindow", "Whispers to New Window / Tab (Default)", 16, 0,
@@ -772,10 +832,22 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         hLinks:SetPoint("TOPLEFT", pGeneral, "TOPLEFT", col1X, y)
         y = y - 26
 
-        cbUrlLinks:ClearAllPoints()
-        cbUrlLinks:SetPoint("TOPLEFT", pGeneral, "TOPLEFT", col1X, y)
-        if cbUrlLinks.text then cbUrlLinks.text:SetWidth(colWidth - 32) end
-        y = y - 40
+        if isWide then
+            cbUrlLinks:ClearAllPoints()
+            cbUrlLinks:SetPoint("TOPLEFT", pGeneral, "TOPLEFT", col1X, y)
+            cpUrlColor:ClearAllPoints()
+            cpUrlColor:SetPoint("TOPLEFT", pGeneral, "TOPLEFT", col2X, y + 2)
+            if cbUrlLinks.text then cbUrlLinks.text:SetWidth(colWidth - 32) end
+            y = y - 44
+        else
+            cbUrlLinks:ClearAllPoints()
+            cbUrlLinks:SetPoint("TOPLEFT", pGeneral, "TOPLEFT", col1X, y)
+            if cbUrlLinks.text then cbUrlLinks.text:SetWidth(colWidth - 32) end
+            y = y - 36
+            cpUrlColor:ClearAllPoints()
+            cpUrlColor:SetPoint("TOPLEFT", pGeneral, "TOPLEFT", col1X + 4, y)
+            y = y - 36
+        end
 
         hWhispers:ClearAllPoints()
         hWhispers:SetPoint("TOPLEFT", pGeneral, "TOPLEFT", col1X, y)
@@ -984,6 +1056,14 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         end,
         "Anchor position of the chat text entry box."
     )
+    local cbCopyButton = self:CreateCheckbox(pLayout, "BFC_CbCopyButton", "Show Copy Button on Chat Tabs", 16, 0,
+        function() return db.showCopyButton ~= false end,
+        function(v)
+            db.showCopyButton = v
+            if BFC.ApplySettings then BFC:ApplySettings() end
+        end,
+        "Displays a subtle copy button on chat frames to open the plain-text message extraction dialog."
+    )
     local cbMouseWheel = self:CreateCheckbox(pLayout, "BFC_CbMouseWheel", "Mousewheel Scrolling (Shift+Wheel to Jump)", 16, 0,
         function() return db.enableMouseWheel ~= false end,
         function(v)
@@ -1054,9 +1134,22 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         hClutter:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
         y = y - 26
 
-        ddEditBoxPos:ClearAllPoints()
-        ddEditBoxPos:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
-        y = y - 50
+        if isWide then
+            ddEditBoxPos:ClearAllPoints()
+            ddEditBoxPos:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            cbCopyButton:ClearAllPoints()
+            cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y + 16)
+            if cbCopyButton.text then cbCopyButton.text:SetWidth(colWidth - 32) end
+            y = y - 50
+        else
+            ddEditBoxPos:ClearAllPoints()
+            ddEditBoxPos:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            y = y - 50
+            cbCopyButton:ClearAllPoints()
+            cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            if cbCopyButton.text then cbCopyButton.text:SetWidth(colWidth - 32) end
+            y = y - 36
+        end
 
         if isWide then
             cbMouseWheel:ClearAllPoints()
@@ -1406,3 +1499,4 @@ function UI:ToggleStandaloneWindow()
         win:Show()
     end
 end
+

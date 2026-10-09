@@ -29,3 +29,4 @@ A high-performance, modular, minimalist chat enhancement suite for World of Warc
 
 Restricted - Source Available (All Rights Reserved, No Derivatives).
 See `LICENSE.md` for terms.
+

@@ -94,3 +94,4 @@ Get-ChildItem -Path $rootDir -Filter "*.zip" -File | ForEach-Object {
 }
 
 Write-Host "Successfully packaged: zips/$zipName" -ForegroundColor Green
+
