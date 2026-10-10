@@ -100,33 +100,23 @@ end
 -------------------------------------------------------------------------------]]
 function BFC:SetupWhisperRouting()
     local db = self.db or {}
-    if db.whisperWindow then
-        -- Native Blizzard CVar for popout whisper tabs
-        if SetCVar then
+    if SetCVar then
+        if db.whisperWindow ~= false then
+            -- Native Blizzard CVar: automatically routes whispers to new temporary tabs
             SetCVar("whisperMode", "popout")
+        else
+            SetCVar("whisperMode", "inline")
         end
     end
 
-    self:RegisterEvent("CHAT_MSG_WHISPER", "OnWhisperMessage")
-    self:RegisterEvent("CHAT_MSG_WHISPER_INFORM", "OnWhisperMessage")
-    self:RegisterEvent("CHAT_MSG_BN_WHISPER", "OnWhisperMessage")
-    self:RegisterEvent("CHAT_MSG_BN_WHISPER_INFORM", "OnWhisperMessage")
-end
-
-function BFC:OnWhisperMessage(event, msg, sender, ...)
-    local db = self.db or {}
-    if not db.whisperWindow then return end
-
-    -- Ensure temporary whisper window/tab is active if supported
-    if FCF_OpenTemporaryWindow and sender and sender ~= "" then
-        local chatType = (event:find("BN_WHISPER")) and "BN_WHISPER" or "WHISPER"
-        local frame = FCF_OpenTemporaryWindow(chatType, sender)
-        if frame and db.whisperNotifyGlow then
-            local tab = _G[frame:GetName() .. "Tab"]
-            if tab and FCF_FlashTab then
-                FCF_FlashTab(tab)
+    if not self._hookedFlashTab and FCF_FlashTab then
+        self._hookedFlashTab = true
+        hooksecurefunc("FCF_FlashTab", function(tab)
+            local currentDb = BFC.db or {}
+            if currentDb.whisperNotifyGlow == false and FCF_StopFlashing then
+                FCF_StopFlashing(tab)
             end
-        end
+        end)
     end
 end
 
@@ -713,6 +703,7 @@ function BFC:PLAYER_ENTERING_WORLD()
 
     -- Re-apply EditBox hooks and arrow mode for all active edit boxes
     self:SetupEditBox()
+    self:SetupWhisperRouting()
 
     if self.hasRestoredHistory then return end
     self.hasRestoredHistory = true

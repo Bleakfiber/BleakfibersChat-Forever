@@ -1,5 +1,10 @@
 # Changelog - Bleakfiber's Chat (Forever)
 
+## [1.0.4] - 2026-10-09
+
+### Added
+- Phase 1 Foundation: Core chat management architecture, link click parsing, whispers in new window by default, and class color names.
+
 ## [1.0.3] - 2026-10-09
 
 ### Added
