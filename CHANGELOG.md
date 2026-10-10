@@ -1,5 +1,10 @@
 # Changelog - Bleakfiber's Chat (Forever)
 
+## [1.0.7] - 2026-10-09
+
+### Fixed
+- **Settings Panel & Profiles Layout**: Fixed widget overlapping in the Profiles and settings tabs by executing initial and tab-switch layout passes and wrapping EditBox controls in unified positioning containers.
+
 ## [1.0.6] - 2026-10-09
 
 ### Added

@@ -595,12 +595,17 @@ end
 -------------------------------------------------------------------------------]]
 function UI:CreateEditBox(parent, name, labelText, x, y, width, getFunc, setFunc)
     width = width or 200
-    local label = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    label:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    local container = CreateFrame("Frame", name .. "Container", parent)
+    container:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    container:SetSize(width, 44)
+
+    local label = container:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    label:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
     label:SetText(labelText)
     label:SetTextColor(COLORS.goldText[1], COLORS.goldText[2], COLORS.goldText[3])
+    container.label = label
 
-    local eb = CreateFrame("EditBox", name, parent, BACKDROP_TEMPLATE)
+    local eb = CreateFrame("EditBox", name, container, BACKDROP_TEMPLATE)
     eb:SetPoint("TOPLEFT", label, "BOTTOMLEFT", 0, -4)
     eb:SetSize(width, 22)
     eb:SetAutoFocus(false)
@@ -609,6 +614,7 @@ function UI:CreateEditBox(parent, name, labelText, x, y, width, getFunc, setFunc
     eb:SetBackdropColor(unpack(COLORS.contentBg))
     eb:SetBackdropBorderColor(unpack(COLORS.goldMuted))
     eb:SetTextInsets(6, 6, 0, 0)
+    container.editBox = eb
 
     local cur = getFunc and getFunc() or ""
     eb:SetText(cur)
@@ -625,16 +631,23 @@ function UI:CreateEditBox(parent, name, labelText, x, y, width, getFunc, setFunc
         self:SetText(getFunc and getFunc() or "")
     end)
 
+    container.SetText = function(self, val)
+        eb:SetText(val or "")
+    end
+    container.GetText = function(self)
+        return eb:GetText()
+    end
+
     table.insert(registeredWidgets, {
         type = "editbox",
-        frame = eb,
+        frame = container,
         update = function()
             local v = getFunc and getFunc() or ""
             eb:SetText(v)
         end,
     })
 
-    return eb
+    return container
 end
 
 --[[-----------------------------------------------------------------------------
@@ -1412,37 +1425,6 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         pProfiles.contentHeight = math.abs(y) + 30
     end
 
-    -- Tab Switcher
-    local function ShowTab(tabId)
-        activeTab = tabId
-        for _, t in ipairs(tabs) do
-            local pane = tabPanes[t.id]
-            local btn = tabButtons[t.id]
-            if t.id == tabId then
-                if pane then pane:Show() end
-                if btn then
-                    btn:SetBackdropColor(unpack(COLORS.tabActive))
-                    btn:SetBackdropBorderColor(unpack(COLORS.goldBorder))
-                    if btn.label then btn.label:SetTextColor(COLORS.goldText[1], COLORS.goldText[2], COLORS.goldText[3]) end
-                end
-            else
-                if pane then pane:Hide() end
-                if btn then
-                    btn:SetBackdropColor(unpack(COLORS.tabNormal))
-                    btn:SetBackdropBorderColor(unpack(COLORS.goldMuted))
-                    if btn.label then btn.label:SetTextColor(COLORS.whiteText[1], COLORS.whiteText[2], COLORS.whiteText[3]) end
-                end
-            end
-        end
-
-        local curPane = tabPanes[tabId]
-        if curPane and curPane.contentHeight then
-            scrollChild:SetHeight(curPane.contentHeight)
-        end
-        scrollFrame:SetVerticalScroll(0)
-        if updateScroll then updateScroll() end
-    end
-
     local function LayoutTabButtons()
         local barWidth = tabsContainer:GetWidth()
         if not barWidth or barWidth < 100 then return end
@@ -1488,20 +1470,65 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         end
     end
 
+    local function LayoutAllTabs(w)
+        w = w or scrollFrame:GetWidth() or contentWidth or 540
+        if not w or w < 100 then w = 540 end
+        scrollChild:SetWidth(w)
+        LayoutGeneral(w)
+        LayoutHistory(w)
+        LayoutLayoutTab(w)
+        LayoutProfiles(w)
+        local curPane = tabPanes[activeTab]
+        if curPane and curPane.contentHeight then
+            scrollChild:SetHeight(curPane.contentHeight)
+        end
+        LayoutTabButtons()
+        if updateScroll then updateScroll() end
+    end
+
+    -- Tab Switcher
+    function ShowTab(tabId)
+        activeTab = tabId
+        for _, t in ipairs(tabs) do
+            local pane = tabPanes[t.id]
+            local btn = tabButtons[t.id]
+            if t.id == tabId then
+                if pane then pane:Show() end
+                if btn then
+                    btn:SetBackdropColor(unpack(COLORS.tabActive))
+                    btn:SetBackdropBorderColor(unpack(COLORS.goldBorder))
+                    if btn.label then btn.label:SetTextColor(COLORS.goldText[1], COLORS.goldText[2], COLORS.goldText[3]) end
+                end
+            else
+                if pane then pane:Hide() end
+                if btn then
+                    btn:SetBackdropColor(unpack(COLORS.tabNormal))
+                    btn:SetBackdropBorderColor(unpack(COLORS.goldMuted))
+                    if btn.label then btn.label:SetTextColor(COLORS.whiteText[1], COLORS.whiteText[2], COLORS.whiteText[3]) end
+                end
+            end
+        end
+
+        local w = scrollFrame:GetWidth() or scrollChild:GetWidth() or contentWidth or 540
+        if not w or w < 100 then w = 540 end
+        if tabId == "general" then LayoutGeneral(w)
+        elseif tabId == "history" then LayoutHistory(w)
+        elseif tabId == "layout" then LayoutLayoutTab(w)
+        elseif tabId == "profiles" then LayoutProfiles(w)
+        end
+
+        local curPane = tabPanes[tabId]
+        if curPane and curPane.contentHeight then
+            scrollChild:SetHeight(curPane.contentHeight)
+        end
+        scrollFrame:SetVerticalScroll(0)
+        if updateScroll then updateScroll() end
+    end
+
     -- Dynamic Reflow on Size Change
     scrollFrame:HookScript("OnSizeChanged", function(self, w, h)
         if w and w > 100 then
-            scrollChild:SetWidth(w)
-            LayoutGeneral(w)
-            LayoutHistory(w)
-            LayoutLayoutTab(w)
-            LayoutProfiles(w)
-            local curPane = tabPanes[activeTab]
-            if curPane and curPane.contentHeight then
-                scrollChild:SetHeight(curPane.contentHeight)
-            end
-            LayoutTabButtons()
-            if updateScroll then updateScroll() end
+            LayoutAllTabs(w)
         end
     end)
 
@@ -1509,7 +1536,14 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         LayoutTabButtons()
     end)
 
-    LayoutTabButtons()
+    parentContainer:HookScript("OnShow", function()
+        local w = scrollFrame:GetWidth() or contentWidth or 540
+        if not w or w < 100 then w = 540 end
+        LayoutAllTabs(w)
+        ShowTab(activeTab)
+    end)
+
+    LayoutAllTabs(contentWidth)
     ShowTab("general")
 end
 
