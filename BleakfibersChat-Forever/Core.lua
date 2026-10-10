@@ -111,6 +111,25 @@ function BFC:OnEnable()
     self:SetupEditBox()
     self:SetupChatHistory()
 
+    if ChatEdit_ActivateChat and not self._hookedActivateChat then
+        self._hookedActivateChat = true
+        hooksecurefunc("ChatEdit_ActivateChat", function(eb)
+            if eb then
+                BFC:HookEditBox(eb)
+            end
+        end)
+    end
+
+    if ChatEdit_SendText and not self._hookedSendText then
+        self._hookedSendText = true
+        hooksecurefunc("ChatEdit_SendText", function(editBox, addHistory)
+            if editBox and editBox._bfcPendingText and editBox._bfcPendingText ~= "" then
+                BFC:OnCommandSent(editBox._bfcPendingText, editBox)
+                editBox._bfcPendingText = nil
+            end
+        end)
+    end
+
     self:RegisterEvent("PLAYER_ENTERING_WORLD")
     self:RegisterEvent("ADDON_LOADED")
 end
@@ -900,6 +919,17 @@ function BFC:NavigateEditBoxHistory(editBox, key)
     if not db.enableEditBoxHistory then return end
 
     local history = self.cmdHistory
+    if not history or #history == 0 then
+        local charKey = self:GetCharKey()
+        local charStore = self.historyDB and self.historyDB[charKey]
+        if charStore and charStore.editBox and #charStore.editBox > 0 then
+            self.cmdHistory = {}
+            for _, line in ipairs(charStore.editBox) do
+                table.insert(self.cmdHistory, line)
+            end
+            history = self.cmdHistory
+        end
+    end
     if not history or #history == 0 then return end
 
     if key == "UP" then
@@ -917,6 +947,7 @@ function BFC:NavigateEditBoxHistory(editBox, key)
         if text then
             editBox:SetText(text)
             editBox:SetCursorPosition(string.len(text))
+            editBox._bfcPendingText = text
         end
     elseif key == "DOWN" then
         if not editBox._bfcHistoryIndex then
@@ -925,8 +956,10 @@ function BFC:NavigateEditBoxHistory(editBox, key)
 
         editBox._bfcHistoryIndex = editBox._bfcHistoryIndex + 1
         if editBox._bfcHistoryIndex > #history then
-            editBox:SetText(editBox._bfcHistoryDraft or "")
-            editBox:SetCursorPosition(string.len(editBox._bfcHistoryDraft or ""))
+            local draft = editBox._bfcHistoryDraft or ""
+            editBox:SetText(draft)
+            editBox:SetCursorPosition(string.len(draft))
+            editBox._bfcPendingText = draft
             editBox._bfcHistoryIndex = nil
             editBox._bfcHistoryDraft = nil
         else
@@ -934,6 +967,7 @@ function BFC:NavigateEditBoxHistory(editBox, key)
             if text then
                 editBox:SetText(text)
                 editBox:SetCursorPosition(string.len(text))
+                editBox._bfcPendingText = text
             end
         end
     end
@@ -965,7 +999,7 @@ function BFC:RestoreEditBoxHistory()
             eb:SetHistoryLines(math.max(#list + 20, maxLines))
         end
         if eb.SetAltArrowKeyMode then
-            eb:SetAltArrowKeyMode(true)
+            eb:SetAltArrowKeyMode(false)
         end
         if eb.AddHistoryLine then
             for _, line in ipairs(list) do
@@ -1170,91 +1204,102 @@ function BFC:SetupEditBox()
         end
     end
 
-    local maxHistory = db.editBoxHistoryLines or 50
+function BFC:HookEditBox(eb)
+    if not eb or eb._bfcHooked then return end
+
+    local maxHistory = self.db and self.db.editBoxHistoryLines or 50
+    if eb.SetHistoryLines then
+        eb:SetHistoryLines(maxHistory)
+    end
+    if eb.SetAltArrowKeyMode then
+        eb:SetAltArrowKeyMode(false)
+    end
+
+    -- Re-apply position and key mode when edit box shows
+    eb:HookScript("OnShow", function(self)
+        local cf = self.chatFrame or SELECTED_CHAT_FRAME or ChatFrame1
+        BFC:PositionEditBox(self, cf)
+        if self.SetAltArrowKeyMode then
+            self:SetAltArrowKeyMode(false)
+        end
+    end)
+
+    -- Track typed text so that it is never lost even if cleared before OnEnterPressed hook
+    eb:HookScript("OnTextChanged", function(self, userInput)
+        local text = self:GetText()
+        if text and text ~= "" then
+            self._bfcPendingText = text
+        end
+    end)
+
+    -- Intercept OnArrowPressed for UP and DOWN arrows (OnKeyDown does not receive arrows in EditBox!)
+    local orig_OnArrowPressed = eb:GetScript("OnArrowPressed")
+    eb:SetScript("OnArrowPressed", function(self, key)
+        if (key == "UP" or key == "DOWN") and not IsAltKeyDown() then
+            BFC:NavigateEditBoxHistory(self, key)
+            return
+        end
+        if orig_OnArrowPressed then
+            orig_OnArrowPressed(self, key)
+        elseif ChatEdit_OnArrowPressed then
+            ChatEdit_OnArrowPressed(self, key)
+        end
+    end)
+
+    -- Intercept OnEnterPressed: Record command into history BEFORE Blizzard clears the editbox!
+    local orig_OnEnterPressed = eb:GetScript("OnEnterPressed")
+    eb:SetScript("OnEnterPressed", function(self)
+        local text = self:GetText()
+        if not text or text == "" then
+            text = self._bfcPendingText
+        end
+        if text and text ~= "" then
+            BFC:OnCommandSent(text, self)
+        end
+        self._bfcPendingText = nil
+        self._bfcHistoryIndex = nil
+        self._bfcHistoryDraft = nil
+        if orig_OnEnterPressed then
+            orig_OnEnterPressed(self)
+        elseif ChatEdit_OnEnterPressed then
+            ChatEdit_OnEnterPressed(self)
+        end
+    end)
+
+    -- Reset navigation cursor when edit box closes or loses focus
+    eb:HookScript("OnEscapePressed", function(self)
+        self._bfcPendingText = nil
+        self._bfcHistoryIndex = nil
+        self._bfcHistoryDraft = nil
+    end)
+    eb:HookScript("OnEditFocusLost", function(self)
+        self._bfcHistoryIndex = nil
+        self._bfcHistoryDraft = nil
+    end)
+
+    eb._bfcHooked = true
+end
+
+function BFC:SetupEditBox()
+    local db = self.db or {}
+
+    -- Sticky Channels Configuration
+    local stickyVal = (db.stickyChannels ~= false) and 1 or 0
+    if ChatTypeInfo then
+        local stickyList = { "SAY", "PARTY", "RAID", "GUILD", "OFFICER", "WHISPER", "CHANNEL" }
+        for _, t in ipairs(stickyList) do
+            if ChatTypeInfo[t] then
+                ChatTypeInfo[t].sticky = stickyVal
+            end
+        end
+    end
+
     local allBoxes = GetAllChatEditBoxes()
     for _, eb in ipairs(allBoxes) do
         local parentCf = eb.chatFrame or SELECTED_CHAT_FRAME or ChatFrame1
         self:PositionEditBox(eb, parentCf)
         SkinEditBox(eb)
-
-        if eb.SetHistoryLines then
-            eb:SetHistoryLines(maxHistory)
-        end
-        -- Keep native AltArrowKeyMode true so Blizzard's native widget does not consume
-        -- plain Up/Down arrow keystrokes, letting our Lua hook cycle history cleanly
-        if eb.SetAltArrowKeyMode then
-            eb:SetAltArrowKeyMode(true)
-        end
-
-        if not eb._bfcHooked then
-            -- Re-apply position and key mode when edit box shows
-            eb:HookScript("OnShow", function(self)
-                local cf = self.chatFrame or SELECTED_CHAT_FRAME or ChatFrame1
-                BFC:PositionEditBox(self, cf)
-                if self.SetAltArrowKeyMode then
-                    self:SetAltArrowKeyMode(true)
-                end
-            end)
-
-            -- Track typed text so that it is never lost even if cleared before OnEnterPressed hook
-            eb:HookScript("OnTextChanged", function(self, userInput)
-                local text = self:GetText()
-                if text and text ~= "" then
-                    self._bfcPendingText = text
-                end
-            end)
-
-            -- Handle Up / Down arrow history recall and Enter key capture
-            eb:HookScript("OnKeyDown", function(self, key)
-                if key == "ENTER" then
-                    local text = self:GetText()
-                    if not text or text == "" then
-                        text = self._bfcPendingText
-                    end
-                    if text and text ~= "" then
-                        BFC:OnCommandSent(text, self)
-                    end
-                    self._bfcPendingText = nil
-                    self._bfcHistoryIndex = nil
-                    self._bfcHistoryDraft = nil
-                elseif key == "ESCAPE" then
-                    self._bfcPendingText = nil
-                    self._bfcHistoryIndex = nil
-                    self._bfcHistoryDraft = nil
-                elseif key == "UP" or key == "DOWN" then
-                    if not IsAltKeyDown() then
-                        BFC:NavigateEditBoxHistory(self, key)
-                    end
-                end
-            end)
-
-            -- Fallback EnterPressed hook
-            eb:HookScript("OnEnterPressed", function(self)
-                local text = self:GetText()
-                if not text or text == "" then
-                    text = self._bfcPendingText
-                end
-                if text and text ~= "" then
-                    BFC:OnCommandSent(text, self)
-                end
-                self._bfcPendingText = nil
-                self._bfcHistoryIndex = nil
-                self._bfcHistoryDraft = nil
-            end)
-
-            -- Reset navigation cursor when edit box closes or loses focus
-            eb:HookScript("OnEscapePressed", function(self)
-                self._bfcPendingText = nil
-                self._bfcHistoryIndex = nil
-                self._bfcHistoryDraft = nil
-            end)
-            eb:HookScript("OnEditFocusLost", function(self)
-                self._bfcHistoryIndex = nil
-                self._bfcHistoryDraft = nil
-            end)
-
-            eb._bfcHooked = true
-        end
+        self:HookEditBox(eb)
     end
 end
 

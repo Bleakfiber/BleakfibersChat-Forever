@@ -1,5 +1,10 @@
 # Changelog - Bleakfiber's Chat (Forever)
 
+## [1.0.9] - 2026-10-10
+
+### Fixed
+- **EditBox Input History Navigation**: Replaced key intercept logic by hooking `OnArrowPressed` directly on chat edit boxes (in WoW, arrow keys fire `OnArrowPressed`, not `OnKeyDown`). Pre-hooked `OnEnterPressed` to capture commands (e.g. `/silly`) before Blizzard clears them. Set `SetAltArrowKeyMode(false)` across all edit boxes and hooked `ChatEdit_ActivateChat` so that pressing the Up arrow immediately recalls prior messages and slash commands without requiring the Alt key.
+
 ## [1.0.8] - 2026-10-10
 
 ### Fixed
