@@ -940,10 +940,12 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         "Prints a subtle divider separating past session messages from fresh chat."
     )
     local btnClearHistory = self:CreateButton(pHistory, "BFC_BtnClearHistory", "Clear Stored History", 16, 0, 160, 24, function()
-        if _G["BleakfibersChatHistory"] then
+        if BFC.ClearHistory then
+            BFC:ClearHistory()
+        elseif _G["BleakfibersChatHistory"] then
             wipe(_G["BleakfibersChatHistory"])
-            print("|cff00c0ffBleakfiber's Chat:|r History buffer cleared.")
         end
+        print("|cff00c0ffBleakfiber's Chat:|r History buffer cleared.")
     end)
 
     local hSticky = self:CreateSectionHeader(pHistory, "EditBox & Command Memory", 16, 0)
@@ -954,6 +956,17 @@ function UI:BuildOptions(parentContainer, isMasterHub)
             if BFC.ApplySettings then BFC:ApplySettings() end
         end,
         "Remembers the last channel used so you do not have to retype the prefix when chatting."
+    )
+    local cbEditBoxHistory = self:CreateCheckbox(pHistory, "BFC_CbEditBoxHistory", "Remember Sent Commands (Up/Down Arrow History)", 16, 0,
+        function() return db.enableEditBoxHistory ~= false end,
+        function(v) db.enableEditBoxHistory = v end,
+        "Saves recently sent chat messages and slash commands across reload and relogs, recallable with the Up/Down arrow keys."
+    )
+    local slEditBoxLines = self:CreateSlider(pHistory, "BFC_SlEditBoxLines", "Command Buffer Size", 10, 100, 5, 16, 0,
+        function() return db.editBoxHistoryLines or 50 end,
+        function(v) db.editBoxHistoryLines = v end,
+        "%d lines",
+        "Maximum number of recent commands and messages saved in memory."
     )
 
     local function LayoutHistory(w)
@@ -1001,6 +1014,23 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         cbSticky:SetPoint("TOPLEFT", pHistory, "TOPLEFT", col1X, y)
         if cbSticky.text then cbSticky.text:SetWidth(w - 48) end
         y = y - 36
+
+        if isWide then
+            cbEditBoxHistory:ClearAllPoints()
+            cbEditBoxHistory:SetPoint("TOPLEFT", pHistory, "TOPLEFT", col1X, y)
+            slEditBoxLines:ClearAllPoints()
+            slEditBoxLines:SetPoint("TOPLEFT", pHistory, "TOPLEFT", col2X, y)
+            if cbEditBoxHistory.text then cbEditBoxHistory.text:SetWidth(colWidth - 32) end
+            y = y - 52
+        else
+            cbEditBoxHistory:ClearAllPoints()
+            cbEditBoxHistory:SetPoint("TOPLEFT", pHistory, "TOPLEFT", col1X, y)
+            if cbEditBoxHistory.text then cbEditBoxHistory.text:SetWidth(colWidth - 32) end
+            y = y - 36
+            slEditBoxLines:ClearAllPoints()
+            slEditBoxLines:SetPoint("TOPLEFT", pHistory, "TOPLEFT", col1X, y)
+            y = y - 48
+        end
 
         pHistory.contentHeight = math.abs(y) + 30
     end
@@ -1055,6 +1085,14 @@ function UI:BuildOptions(parentContainer, isMasterHub)
             if BFC.ApplySettings then BFC:ApplySettings() end
         end,
         "Anchor position of the chat text entry box."
+    )
+    local cbEditBoxBackdrop = self:CreateCheckbox(pLayout, "BFC_CbEditBoxBackdrop", "Dark Slate & Gold EditBox Skinning", 16, 0,
+        function() return db.editBoxBackdrop ~= false end,
+        function(v)
+            db.editBoxBackdrop = v
+            if BFC.ApplySettings then BFC:ApplySettings() end
+        end,
+        "Applies Dark Slate & Gold backdrop skinning and focus glow effects to the chat entry box."
     )
     local cbCopyButton = self:CreateCheckbox(pLayout, "BFC_CbCopyButton", "Show Copy Button on Chat Tabs", 16, 0,
         function() return db.showCopyButton ~= false end,
@@ -1137,37 +1175,46 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         if isWide then
             ddEditBoxPos:ClearAllPoints()
             ddEditBoxPos:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
-            cbCopyButton:ClearAllPoints()
-            cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y + 16)
-            if cbCopyButton.text then cbCopyButton.text:SetWidth(colWidth - 32) end
+            cbEditBoxBackdrop:ClearAllPoints()
+            cbEditBoxBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y + 16)
+            if cbEditBoxBackdrop.text then cbEditBoxBackdrop.text:SetWidth(colWidth - 32) end
             y = y - 50
+
+            cbCopyButton:ClearAllPoints()
+            cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            cbMouseWheel:ClearAllPoints()
+            cbMouseWheel:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
+            if cbCopyButton.text then cbCopyButton.text:SetWidth(colWidth - 32) end
+            if cbMouseWheel.text then cbMouseWheel.text:SetWidth(colWidth - 32) end
+            y = y - 40
+
+            cbUnclamp:ClearAllPoints()
+            cbUnclamp:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            cbHideButtons:ClearAllPoints()
+            cbHideButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
+            if cbUnclamp.text then cbUnclamp.text:SetWidth(colWidth - 32) end
+            if cbHideButtons.text then cbHideButtons.text:SetWidth(colWidth - 32) end
+            y = y - 40
+
+            cbHideScrollButtons:ClearAllPoints()
+            cbHideScrollButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            if cbHideScrollButtons.text then cbHideScrollButtons.text:SetWidth(colWidth - 32) end
+            y = y - 44
         else
             ddEditBoxPos:ClearAllPoints()
             ddEditBoxPos:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
             y = y - 50
+
+            cbEditBoxBackdrop:ClearAllPoints()
+            cbEditBoxBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            if cbEditBoxBackdrop.text then cbEditBoxBackdrop.text:SetWidth(colWidth - 32) end
+            y = y - 36
+
             cbCopyButton:ClearAllPoints()
             cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
             if cbCopyButton.text then cbCopyButton.text:SetWidth(colWidth - 32) end
             y = y - 36
-        end
 
-        if isWide then
-            cbMouseWheel:ClearAllPoints()
-            cbMouseWheel:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
-            cbUnclamp:ClearAllPoints()
-            cbUnclamp:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
-            if cbMouseWheel.text then cbMouseWheel.text:SetWidth(colWidth - 32) end
-            if cbUnclamp.text then cbUnclamp.text:SetWidth(colWidth - 32) end
-            y = y - 40
-
-            cbHideButtons:ClearAllPoints()
-            cbHideButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
-            cbHideScrollButtons:ClearAllPoints()
-            cbHideScrollButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
-            if cbHideButtons.text then cbHideButtons.text:SetWidth(colWidth - 32) end
-            if cbHideScrollButtons.text then cbHideScrollButtons.text:SetWidth(colWidth - 32) end
-            y = y - 44
-        else
             cbMouseWheel:ClearAllPoints()
             cbMouseWheel:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
             if cbMouseWheel.text then cbMouseWheel.text:SetWidth(colWidth - 32) end

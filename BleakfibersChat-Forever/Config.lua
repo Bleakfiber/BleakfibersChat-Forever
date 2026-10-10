@@ -43,6 +43,7 @@ local DB_DEFAULTS = {
 
         -- EditBox & Frame Layout
         editBoxPosition = "BOTTOM",  -- "BOTTOM" or "TOP"
+        editBoxBackdrop = true,      -- Dark Slate & Gold EditBox Skinning
         showCopyButton = true,       -- Show copy button on chat frames
         hideChatButtons = true,      -- Hides chat menu, voice, channel buttons
         hideScrollButtons = true,    -- Hides bottom scroll buttons
@@ -259,10 +260,12 @@ SlashCmdList["BLEAKFIBERSCHAT"] = function(msg)
             BFC:OpenActiveChatCopy()
         end
     elseif arg1 == "history" and arg2 == "clear" then
-        if _G["BleakfibersChatHistory"] then
+        if BFC.ClearHistory then
+            BFC:ClearHistory()
+        elseif _G["BleakfibersChatHistory"] then
             wipe(_G["BleakfibersChatHistory"])
         end
-        print("|cff00c0ffBleakfiber's Chat:|r Chat history buffer cleared.")
+        print("|cff00c0ffBleakfiber's Chat:|r Chat and command history buffers cleared.")
     elseif arg1 == "reset" then
         BFC:ResetProfile()
         print("|cff00c0ffBleakfiber's Chat:|r Profile settings reset to defaults.")

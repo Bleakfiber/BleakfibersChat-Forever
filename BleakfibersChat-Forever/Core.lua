@@ -581,37 +581,112 @@ end
     Persistent Chat History & Session Divider
 -------------------------------------------------------------------------------]]
 function BFC:SetupChatHistory()
-    -- Initialized; restored on PLAYER_ENTERING_WORLD
+    -- History is loaded once on PLAYER_ENTERING_WORLD
 end
 
-function BFC:PLAYER_ENTERING_WORLD()
-    local db = self.db or {}
-    if not db.enableChatHistory then return end
+function BFC:ClearHistory()
+    if self.historyDB and self.charKey and self.historyDB[self.charKey] then
+        self.historyDB[self.charKey].frames = {}
+        self.historyDB[self.charKey].editBox = {}
+    end
+    wipe(self.sessionHistory)
 
-    local charStore = self.historyDB[self.charKey]
-    if not (charStore and charStore.frames) then return end
-
-    self.isRestoringHistory = true
     local numWindows = NUM_CHAT_WINDOWS or 7
-
     for i = 1, numWindows do
-        local cf = _G["ChatFrame" .. i]
-        if cf then
-            local fName = cf:GetName()
-            local savedLines = charStore.frames[fName]
-            if savedLines and #savedLines > 0 then
-                -- Print session divider
-                if db.showSessionDivider then
-                    cf:AddMessage("|cff666666------------- Previous Session -------------|r", 0.5, 0.5, 0.5)
-                end
-                for _, entry in ipairs(savedLines) do
-                    cf:AddMessage(entry.text, entry.r or 1, entry.g or 1, entry.b or 1)
-                end
+        local eb = _G["ChatFrame" .. i .. "EditBox"]
+        if eb and eb.ClearHistory then
+            eb:ClearHistory()
+        end
+    end
+end
+
+function BFC:OnCommandSent(text)
+    if not text or text == "" then return end
+    local db = self.db or {}
+    if not db.enableEditBoxHistory then return end
+
+    local charStore = self.historyDB and self.historyDB[self.charKey]
+    if not charStore then return end
+
+    charStore.editBox = charStore.editBox or {}
+    local list = charStore.editBox
+
+    -- Prevent duplicate consecutive entries
+    if #list > 0 and list[#list] == text then
+        return
+    end
+
+    -- Ignore passwords/secrets
+    local lower = text:lower()
+    if lower:find("^/pass") or lower:find("^/secret") then
+        return
+    end
+
+    table.insert(list, text)
+
+    local maxLines = db.editBoxHistoryLines or 50
+    while #list > maxLines do
+        table.remove(list, 1)
+    end
+end
+
+function BFC:RestoreEditBoxHistory()
+    local db = self.db or {}
+    if not db.enableEditBoxHistory then return end
+
+    local charStore = self.historyDB and self.historyDB[self.charKey]
+    if not (charStore and charStore.editBox) then return end
+
+    local list = charStore.editBox
+    if #list == 0 then return end
+
+    local numWindows = NUM_CHAT_WINDOWS or 7
+    for i = 1, numWindows do
+        local eb = _G["ChatFrame" .. i .. "EditBox"]
+        if eb and eb.AddHistoryLine then
+            for _, line in ipairs(list) do
+                eb:AddHistoryLine(line)
             end
         end
     end
+end
 
-    self.isRestoringHistory = false
+function BFC:PLAYER_ENTERING_WORLD()
+    if self.hasRestoredHistory then return end
+    self.hasRestoredHistory = true
+
+    local db = self.db or {}
+
+    -- 1. Restore Chat Message History
+    if db.enableChatHistory then
+        local charStore = self.historyDB and self.historyDB[self.charKey]
+        if charStore and charStore.frames then
+            self.isRestoringHistory = true
+            local numWindows = NUM_CHAT_WINDOWS or 7
+
+            for i = 1, numWindows do
+                local cf = _G["ChatFrame" .. i]
+                if cf then
+                    local fName = cf:GetName()
+                    local savedLines = charStore.frames[fName]
+                    if savedLines and #savedLines > 0 then
+                        -- Print session divider
+                        if db.showSessionDivider then
+                            cf:AddMessage("|cff666666------------- |cffffd100Previous Session|r |cff666666-------------|r", 0.5, 0.5, 0.5)
+                        end
+                        for _, entry in ipairs(savedLines) do
+                            cf:AddMessage(entry.text, entry.r or 1, entry.g or 1, entry.b or 1)
+                        end
+                    end
+                end
+            end
+
+            self.isRestoringHistory = false
+        end
+    end
+
+    -- 2. Restore EditBox Command History
+    self:RestoreEditBoxHistory()
 end
 
 -- Public extraction helper for CopyFrame
@@ -647,33 +722,74 @@ function BFC:OpenActiveChatCopy()
 end
 
 --[[-----------------------------------------------------------------------------
-    EditBox Modernization: Docking, Sticky Channels & Command Memory
+    EditBox Modernization: Docking, Sticky Channels & Skinning
 -------------------------------------------------------------------------------]]
-function BFC:SetupEditBox()
-    local db = self.db or {}
+local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
 
-    -- Sticky Channels Configuration
-    if db.stickyChannels and ChatTypeInfo then
-        local stickyList = { "SAY", "PARTY", "RAID", "GUILD", "OFFICER", "WHISPER", "CHANNEL" }
-        for _, t in ipairs(stickyList) do
-            if ChatTypeInfo[t] then
-                ChatTypeInfo[t].sticky = 1
+local function SkinEditBox(editBox)
+    if not editBox then return end
+    local name = editBox:GetName()
+    if not name then return end
+
+    local db = BFC.db or {}
+
+    -- Handle default Blizzard textures
+    local left = _G[name .. "Left"]
+    local right = _G[name .. "Right"]
+    local mid = _G[name .. "Mid"]
+
+    if db.editBoxBackdrop ~= false then
+        if left then left:SetAlpha(0) end
+        if right then right:SetAlpha(0) end
+        if mid then mid:SetAlpha(0) end
+    else
+        if left then left:SetAlpha(1) end
+        if right then right:SetAlpha(1) end
+        if mid then mid:SetAlpha(1) end
+        if editBox.bleakBackdrop then
+            editBox.bleakBackdrop:Hide()
+        end
+        return
+    end
+
+    if not editBox.bleakBackdrop then
+        local bd = CreateFrame("Frame", nil, editBox, BACKDROP_TEMPLATE)
+        bd:SetAllPoints(editBox)
+        bd:SetFrameLevel(math.max(0, editBox:GetFrameLevel() - 1))
+        bd:SetBackdrop({
+            bgFile = "Interface\\Buttons\\WHITE8X8",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true,
+            tileSize = 12,
+            edgeSize = 12,
+            insets = { left = 3, right = 3, top = 3, bottom = 3 }
+        })
+        bd:SetBackdropColor(0.08, 0.10, 0.13, 0.94)
+        bd:SetBackdropBorderColor(0.82, 0.68, 0.28, 0.85)
+        editBox.bleakBackdrop = bd
+
+        editBox:SetTextInsets(8, 8, 0, 0)
+
+        editBox:HookScript("OnEditFocusGained", function(self)
+            if self.bleakBackdrop then
+                self.bleakBackdrop:SetBackdropBorderColor(1.00, 0.82, 0.25, 1.00)
             end
-        end
+        end)
+        editBox:HookScript("OnEditFocusLost", function(self)
+            if self.bleakBackdrop then
+                self.bleakBackdrop:SetBackdropBorderColor(0.50, 0.42, 0.20, 0.85)
+            end
+        end)
     end
 
-    -- Reposition EditBox (Bottom or Top)
-    for i = 1, NUM_CHAT_WINDOWS or 7 do
-        local eb = _G["ChatFrame" .. i .. "EditBox"]
-        if eb then
-            self:PositionEditBox(eb, _G["ChatFrame" .. i])
-        end
-    end
+    editBox.bleakBackdrop:Show()
 end
 
 function BFC:PositionEditBox(editBox, chatFrame)
     local db = self.db or {}
-    if not (editBox and chatFrame) then return end
+    if not editBox then return end
+    chatFrame = chatFrame or editBox.chatFrame or SELECTED_CHAT_FRAME or ChatFrame1
+    if not chatFrame then return end
 
     editBox:ClearAllPoints()
     if db.editBoxPosition == "TOP" then
@@ -683,6 +799,48 @@ function BFC:PositionEditBox(editBox, chatFrame)
         -- Standard BOTTOM docking
         editBox:SetPoint("TOPLEFT", chatFrame, "BOTTOMLEFT", -5, -8)
         editBox:SetPoint("TOPRIGHT", chatFrame, "BOTTOMRIGHT", 5, -8)
+    end
+end
+
+function BFC:SetupEditBox()
+    local db = self.db or {}
+
+    -- Sticky Channels Configuration
+    local stickyVal = (db.stickyChannels ~= false) and 1 or 0
+    if ChatTypeInfo then
+        local stickyList = { "SAY", "PARTY", "RAID", "GUILD", "OFFICER", "WHISPER", "CHANNEL" }
+        for _, t in ipairs(stickyList) do
+            if ChatTypeInfo[t] then
+                ChatTypeInfo[t].sticky = stickyVal
+            end
+        end
+    end
+
+    -- Process all chat EditBoxes
+    local numWindows = NUM_CHAT_WINDOWS or 7
+    for i = 1, numWindows do
+        local eb = _G["ChatFrame" .. i .. "EditBox"]
+        if eb then
+            self:PositionEditBox(eb, _G["ChatFrame" .. i])
+            SkinEditBox(eb)
+
+            if not eb._bfcHooked then
+                -- Re-apply position when edit box shows to prevent Blizzard snapping
+                eb:HookScript("OnShow", function(self)
+                    BFC:PositionEditBox(self, self.chatFrame or SELECTED_CHAT_FRAME or _G["ChatFrame" .. i])
+                end)
+
+                -- Capture command history when Enter is pressed
+                eb:HookScript("OnEnterPressed", function(self)
+                    local text = self:GetText()
+                    if text and text ~= "" then
+                        BFC:OnCommandSent(text)
+                    end
+                end)
+
+                eb._bfcHooked = true
+            end
+        end
     end
 end
 

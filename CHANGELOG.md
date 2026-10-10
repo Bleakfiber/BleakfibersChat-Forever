@@ -2,6 +2,19 @@
 
 All notable changes to **Bleakfiber's Chat - Forever** are documented below.
 
+## [1.0.2] - 2026-10-09: Phase 3 Persistent History & EditBox Modernization
+
+### Added
+- **Command History Persistence**: Captured outgoing chat messages and slash commands in SavedVariables across `/reload` and game sessions, cycleable via the Up/Down arrow keys.
+- **Consecutive Duplicate & Sensitive Filter**: Automatically skips duplicate identical consecutive commands and suppresses sensitive commands (`/pass`, `/secret`).
+- **Zoning Safe History Restoration**: Guarded `PLAYER_ENTERING_WORLD` to restore history only once per game session, preventing duplicate message playback when entering dungeons, portals, or hearthstoning.
+- **Stylized Session Dividers**: High-visibility Dark Slate & Gold session divider marking the transition between past session history and live messages.
+- **Dark Slate & Gold EditBox Skinning**: Dedicated backdrop frame with border styling, comfortable text insets, and dynamic focus glow effects (`OnEditFocusGained` / `OnEditFocusLost`).
+- **Robust EditBox Docking**: Smooth `TOP` or `BOTTOM` anchoring with `OnShow` position locking to prevent default chat frame anchor snapping.
+- **Bidirectional Sticky Channels**: Fully toggleable sticky channel memory across `/say`, `/party`, `/raid`, `/guild`, `/officer`, `/whisper`, and numbered channels.
+- **Thorough Buffer Clearing**: `/bfchat history clear` completely purges SavedVariables chat history, command history, and in-memory session tables.
+- **Expanded Settings UI**: Added controls for Command History buffer size, Up/Down arrow memory toggle, and EditBox skinning toggle.
+
 ## [1.0.1] - 2026-10-09: Phase 2 URL Detection & Copy Dialog Enhancements
 
 ### Added
