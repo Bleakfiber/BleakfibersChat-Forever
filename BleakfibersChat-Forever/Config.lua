@@ -9,7 +9,7 @@ BFC = BFC or {}
 _G["BleakfibersChat"] = BFC
 
 BFC.addonName = addonName
-BFC.version = "1.0.0"
+BFC.version = "1.0.3"
 
 --[[-----------------------------------------------------------------------------
     SavedVariables Schema & Default Settings

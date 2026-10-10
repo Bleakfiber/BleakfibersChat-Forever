@@ -31,6 +31,42 @@ local CHANNEL_REPLACEMENTS = {
 -- Session in-memory line buffer per frame for copy & export
 BFC.sessionHistory = {}
 
+function BFC:GetCharKey()
+    local charName = UnitName("player")
+    local realmName = GetRealmName()
+    if charName and realmName and charName ~= "" and realmName ~= "" and charName ~= "Unknown" then
+        return charName .. " - " .. realmName
+    end
+    return self.charKey or ((charName or "Unknown") .. " - " .. (realmName or "DefaultRealm"))
+end
+
+local function GetAllChatEditBoxes()
+    local list = {}
+    local seen = {}
+    local function addBox(eb)
+        if eb and not seen[eb] then
+            seen[eb] = true
+            table.insert(list, eb)
+        end
+    end
+
+    addBox(_G["ChatFrameEditBox"])
+    if ChatEdit_GetActiveWindow then
+        addBox(ChatEdit_GetActiveWindow())
+    end
+
+    local numWindows = NUM_CHAT_WINDOWS or 7
+    for i = 1, numWindows do
+        addBox(_G["ChatFrame" .. i .. "EditBox"])
+        local cf = _G["ChatFrame" .. i]
+        if cf and cf.editBox then
+            addBox(cf.editBox)
+        end
+    end
+
+    return list
+end
+
 --[[-----------------------------------------------------------------------------
     Lifecycle: OnInitialize & OnEnable
 -------------------------------------------------------------------------------]]
@@ -39,9 +75,7 @@ function BFC:OnInitialize()
     self:RegisterWithMasterConfig()
 
     -- Character key for persistent storage
-    local charName = UnitName("player") or "Unknown"
-    local realmName = GetRealmName() or "DefaultRealm"
-    self.charKey = charName .. " - " .. realmName
+    self.charKey = self:GetCharKey()
 
     -- Ensure character storage table exists
     self.historyDB[self.charKey] = self.historyDB[self.charKey] or {
@@ -502,7 +536,7 @@ function BFC:InitChatFrame(cf)
     CreateCopyButton(cf)
 
     -- Position edit box
-    local eb = _G[fName .. "EditBox"]
+    local eb = _G[fName .. "EditBox"] or _G["ChatFrameEditBox"]
     if eb then
         self:PositionEditBox(eb, cf)
     end
@@ -585,16 +619,16 @@ function BFC:SetupChatHistory()
 end
 
 function BFC:ClearHistory()
-    if self.historyDB and self.charKey and self.historyDB[self.charKey] then
-        self.historyDB[self.charKey].frames = {}
-        self.historyDB[self.charKey].editBox = {}
+    local charKey = self:GetCharKey()
+    if self.historyDB and self.historyDB[charKey] then
+        self.historyDB[charKey].frames = {}
+        self.historyDB[charKey].editBox = {}
     end
     wipe(self.sessionHistory)
 
-    local numWindows = NUM_CHAT_WINDOWS or 7
-    for i = 1, numWindows do
-        local eb = _G["ChatFrame" .. i .. "EditBox"]
-        if eb and eb.ClearHistory then
+    local allBoxes = GetAllChatEditBoxes()
+    for _, eb in ipairs(allBoxes) do
+        if eb.ClearHistory then
             eb:ClearHistory()
         end
     end
@@ -605,7 +639,8 @@ function BFC:OnCommandSent(text)
     local db = self.db or {}
     if not db.enableEditBoxHistory then return end
 
-    local charStore = self.historyDB and self.historyDB[self.charKey]
+    local charKey = self:GetCharKey()
+    local charStore = self.historyDB and self.historyDB[charKey]
     if not charStore then return end
 
     charStore.editBox = charStore.editBox or {}
@@ -634,16 +669,23 @@ function BFC:RestoreEditBoxHistory()
     local db = self.db or {}
     if not db.enableEditBoxHistory then return end
 
-    local charStore = self.historyDB and self.historyDB[self.charKey]
+    local charKey = self:GetCharKey()
+    local charStore = self.historyDB and self.historyDB[charKey]
     if not (charStore and charStore.editBox) then return end
 
     local list = charStore.editBox
     if #list == 0 then return end
 
-    local numWindows = NUM_CHAT_WINDOWS or 7
-    for i = 1, numWindows do
-        local eb = _G["ChatFrame" .. i .. "EditBox"]
-        if eb and eb.AddHistoryLine then
+    local maxLines = db.editBoxHistoryLines or 50
+    local allBoxes = GetAllChatEditBoxes()
+    for _, eb in ipairs(allBoxes) do
+        if eb.SetHistoryLines then
+            eb:SetHistoryLines(math.max(#list + 20, maxLines))
+        end
+        if eb.SetAltArrowKeyMode then
+            eb:SetAltArrowKeyMode(false)
+        end
+        if eb.AddHistoryLine then
             for _, line in ipairs(list) do
                 eb:AddHistoryLine(line)
             end
@@ -652,6 +694,26 @@ function BFC:RestoreEditBoxHistory()
 end
 
 function BFC:PLAYER_ENTERING_WORLD()
+    local realKey = self:GetCharKey()
+    if realKey ~= "Unknown - DefaultRealm" then
+        if self.charKey and self.charKey ~= realKey and self.historyDB[self.charKey] then
+            if not self.historyDB[realKey] then
+                self.historyDB[realKey] = self.historyDB[self.charKey]
+            end
+            if self.charKey == "Unknown - DefaultRealm" then
+                self.historyDB["Unknown - DefaultRealm"] = nil
+            end
+        end
+        self.charKey = realKey
+        self.historyDB[self.charKey] = self.historyDB[self.charKey] or {
+            frames = {},
+            editBox = {},
+        }
+    end
+
+    -- Re-apply EditBox hooks and arrow mode for all active edit boxes
+    self:SetupEditBox()
+
     if self.hasRestoredHistory then return end
     self.hasRestoredHistory = true
 
@@ -816,30 +878,40 @@ function BFC:SetupEditBox()
         end
     end
 
-    -- Process all chat EditBoxes
-    local numWindows = NUM_CHAT_WINDOWS or 7
-    for i = 1, numWindows do
-        local eb = _G["ChatFrame" .. i .. "EditBox"]
-        if eb then
-            self:PositionEditBox(eb, _G["ChatFrame" .. i])
-            SkinEditBox(eb)
+    local maxHistory = db.editBoxHistoryLines or 50
+    local allBoxes = GetAllChatEditBoxes()
+    for _, eb in ipairs(allBoxes) do
+        local parentCf = eb.chatFrame or SELECTED_CHAT_FRAME or ChatFrame1
+        self:PositionEditBox(eb, parentCf)
+        SkinEditBox(eb)
 
-            if not eb._bfcHooked then
-                -- Re-apply position when edit box shows to prevent Blizzard snapping
-                eb:HookScript("OnShow", function(self)
-                    BFC:PositionEditBox(self, self.chatFrame or SELECTED_CHAT_FRAME or _G["ChatFrame" .. i])
-                end)
+        -- Allow Up / Down arrow history navigation without holding Alt key
+        if eb.SetAltArrowKeyMode then
+            eb:SetAltArrowKeyMode(false)
+        end
+        if eb.SetHistoryLines then
+            eb:SetHistoryLines(maxHistory)
+        end
 
-                -- Capture command history when Enter is pressed
-                eb:HookScript("OnEnterPressed", function(self)
-                    local text = self:GetText()
-                    if text and text ~= "" then
-                        BFC:OnCommandSent(text)
-                    end
-                end)
+        if not eb._bfcHooked then
+            -- Re-apply position and arrow key mode when edit box shows
+            eb:HookScript("OnShow", function(self)
+                local cf = self.chatFrame or SELECTED_CHAT_FRAME or ChatFrame1
+                BFC:PositionEditBox(self, cf)
+                if self.SetAltArrowKeyMode then
+                    self:SetAltArrowKeyMode(false)
+                end
+            end)
 
-                eb._bfcHooked = true
-            end
+            -- Capture command history when Enter is pressed
+            eb:HookScript("OnEnterPressed", function(self)
+                local text = self:GetText()
+                if text and text ~= "" then
+                    BFC:OnCommandSent(text)
+                end
+            end)
+
+            eb._bfcHooked = true
         end
     end
 end
