@@ -16,20 +16,24 @@ end
 
 -- Channel name shortening lookup
 local CHANNEL_REPLACEMENTS = {
-    ["%[(%d+)%.%s*.-%]"]     = "[%1]",
-    ["%[Guild%]"]            = "[G]",
-    ["%[Party%]"]            = "[P]",
-    ["%[Party Leader%]"]     = "[PL]",
-    ["%[Raid%]"]             = "[R]",
-    ["%[Raid Leader%]"]      = "[RL]",
-    ["%[Raid Warning%]"]     = "[RW]",
-    ["%[Officer%]"]          = "[O]",
-    ["%[Battleground%]"]     = "[BG]",
+    ["%[(%d+)%.%s*.-%]"]        = "[%1]",
+    ["%[Guild%]"]               = "[G]",
+    ["%[Party%]"]               = "[P]",
+    ["%[Party Leader%]"]        = "[PL]",
+    ["%[Raid%]"]                = "[R]",
+    ["%[Raid Leader%]"]         = "[RL]",
+    ["%[Raid Warning%]"]        = "[RW]",
+    ["%[Officer%]"]             = "[O]",
+    ["%[Battleground%]"]        = "[BG]",
     ["%[Battleground Leader%]"] = "[BL]",
+    ["%[Instance%]"]            = "[I]",
+    ["%[Instance Leader%]"]     = "[IL]",
+    ["%[Dungeon Guide%]"]       = "[DG]",
 }
 
 -- Session in-memory line buffer per frame for copy & export
 BFC.sessionHistory = {}
+BFC.playerClassCache = {}
 
 function BFC:GetCharKey()
     local charName = UnitName("player")
@@ -147,6 +151,64 @@ function BFC:SetupClassColoring()
             end
         end
     end
+
+    if not self._rosterEventsRegistered then
+        self._rosterEventsRegistered = true
+        self:RegisterEvent("FRIENDLIST_UPDATE", "UpdateRosterCache")
+        self:RegisterEvent("GUILD_ROSTER_UPDATE", "UpdateRosterCache")
+        self:RegisterEvent("CHAT_MSG_SAY", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_YELL", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_PARTY", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_PARTY_LEADER", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_RAID", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_RAID_LEADER", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_RAID_WARNING", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_GUILD", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_OFFICER", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_WHISPER", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_WHISPER_INFORM", "OnMessageEvent")
+        self:RegisterEvent("CHAT_MSG_CHANNEL", "OnMessageEvent")
+    end
+    self:UpdateRosterCache()
+end
+
+function BFC:UpdateRosterCache()
+    -- Friends
+    local numFriends = GetNumFriends and GetNumFriends() or 0
+    for i = 1, numFriends do
+        local name, _, class = GetFriendInfo(i)
+        if name and class then
+            local cleanName = name:match("^(.-)%-") or name
+            for token, localized in pairs(LOCALIZED_CLASS_NAMES_MALE or {}) do
+                if localized == class then self.playerClassCache[cleanName] = token break end
+            end
+            for token, localized in pairs(LOCALIZED_CLASS_NAMES_FEMALE or {}) do
+                if localized == class then self.playerClassCache[cleanName] = token break end
+            end
+        end
+    end
+
+    -- Guild
+    if IsInGuild and IsInGuild() and GetNumGuildMembers then
+        local numGuild = GetNumGuildMembers() or 0
+        for i = 1, numGuild do
+            local name, _, _, _, _, _, _, _, _, _, classFileName = GetGuildRosterInfo(i)
+            if name and classFileName then
+                local cleanName = name:match("^(.-)%-") or name
+                self.playerClassCache[cleanName] = classFileName
+            end
+        end
+    end
+end
+
+function BFC:OnMessageEvent(event, msg, sender, _, _, _, _, _, _, _, _, guid)
+    if sender and guid and guid ~= "" and GetPlayerInfoByGUID then
+        local _, classToken = GetPlayerInfoByGUID(guid)
+        if classToken then
+            local cleanName = sender:match("^(.-)%-") or sender
+            self.playerClassCache[cleanName] = classToken
+        end
+    end
 end
 
 -- Helper: Retrieve player class color hex
@@ -154,25 +216,38 @@ function BFC:GetPlayerClassHex(name, guid)
     if guid and guid ~= "" and GetPlayerInfoByGUID then
         local _, classToken = GetPlayerInfoByGUID(guid)
         if classToken and CLASS_COLORS[classToken] then
+            if name and name ~= "" then
+                local cleanName = name:match("^(.-)%-") or name
+                self.playerClassCache[cleanName] = classToken
+            end
+            return CLASS_COLORS[classToken]
+        end
+    end
+
+    if not name or name == "" then return nil end
+    local cleanName = name:match("^(.-)%-") or name
+
+    -- Check cache
+    if self.playerClassCache[cleanName] and CLASS_COLORS[self.playerClassCache[cleanName]] then
+        return CLASS_COLORS[self.playerClassCache[cleanName]]
+    end
+
+    -- Check player
+    if UnitName("player") == cleanName then
+        local _, classToken = UnitClass("player")
+        if classToken and CLASS_COLORS[classToken] then
+            self.playerClassCache[cleanName] = classToken
             return CLASS_COLORS[classToken]
         end
     end
 
     -- Check party/raid units
-    if name and name ~= "" then
-        local cleanName = name:match("^(.-)%-") or name
-        for i = 1, GetNumGroupMembers() or 0 do
-            local unit = (IsInRaid() and "raid" or "party") .. i
-            if UnitName(unit) == cleanName then
-                local _, classToken = UnitClass(unit)
-                if classToken and CLASS_COLORS[classToken] then
-                    return CLASS_COLORS[classToken]
-                end
-            end
-        end
-        if UnitName("player") == cleanName then
-            local _, classToken = UnitClass("player")
+    for i = 1, GetNumGroupMembers() or 0 do
+        local unit = (IsInRaid() and "raid" or "party") .. i
+        if UnitName(unit) == cleanName then
+            local _, classToken = UnitClass(unit)
             if classToken and CLASS_COLORS[classToken] then
+                self.playerClassCache[cleanName] = classToken
                 return CLASS_COLORS[classToken]
             end
         end
@@ -318,16 +393,31 @@ function BFC:ProcessMessageText(message, sender, guid)
     end
 
     -- 3. Universal Player Class Coloring in Hyperlinks
-    if db.classColorNames and sender and sender ~= "" then
-        local classHex = self:GetPlayerClassHex(sender, guid)
-        if classHex then
-            -- Replace player link color with class color
-            local searchStr = "|Hplayer:" .. sender
-            if message:find(searchStr, 1, true) then
-                local pat = "(|c%x%x%x%x%x%x%x%x)(|Hplayer:" .. sender .. ".-|h%[.-%]|h|r)"
-                message = message:gsub(pat, "|cff" .. classHex .. "%2")
+    if db.classColorNames then
+        message = message:gsub("(|c%x%x%x%x%x%x%x%x)(|Hplayer:([^:]+).-|h%[.-%]|h|r)", function(color, link, name)
+            local cleanName = name:match("^(.-)%-") or name
+            local classHex = BFC:GetPlayerClassHex(cleanName)
+            if classHex then
+                return "|cff" .. classHex .. link
             end
-        end
+            return color .. link
+        end)
+        message = message:gsub("([^|])(|Hplayer:([^:]+).-|h%[.-%]|h)", function(prefix, link, name)
+            local cleanName = name:match("^(.-)%-") or name
+            local classHex = BFC:GetPlayerClassHex(cleanName)
+            if classHex then
+                return prefix .. "|cff" .. classHex .. link .. "|r"
+            end
+            return prefix .. link
+        end)
+        message = message:gsub("^(|Hplayer:([^:]+).-|h%[.-%]|h)", function(link, name)
+            local cleanName = name:match("^(.-)%-") or name
+            local classHex = BFC:GetPlayerClassHex(cleanName)
+            if classHex then
+                return "|cff" .. classHex .. link .. "|r"
+            end
+            return link
+        end)
     end
 
     -- 4. Timestamps
@@ -442,48 +532,72 @@ function BFC:InitChatFrame(cf)
     local db = self.db or {}
 
     -- Unclamp frame to allow flush screen placement
-    if db.unclampFromScreen then
-        cf:SetClampedToScreen(false)
-    end
+    cf:SetClampedToScreen(not db.unclampFromScreen)
 
-    -- Mousewheel scrolling (Smooth + Shift jump)
+    -- Mousewheel scrolling (Smooth + Shift jump + Ctrl jump)
     if db.enableMouseWheel then
         cf:EnableMouseWheel(true)
-        cf:SetScript("OnMouseWheel", function(self, delta)
-            if delta > 0 then
-                if IsShiftKeyDown() then
-                    self:ScrollToTop()
-                else
-                    self:ScrollUp()
+        if not cf._bfcWheelHooked then
+            cf._bfcWheelHooked = true
+            cf:SetScript("OnMouseWheel", function(self, delta)
+                if delta > 0 then
+                    if IsShiftKeyDown() then
+                        self:ScrollToTop()
+                    elseif IsControlKeyDown() then
+                        for i = 1, 5 do self:ScrollUp() end
+                    else
+                        self:ScrollUp()
+                    end
+                elseif delta < 0 then
+                    if IsShiftKeyDown() then
+                        self:ScrollToBottom()
+                    elseif IsControlKeyDown() then
+                        for i = 1, 5 do self:ScrollDown() end
+                    else
+                        self:ScrollDown()
+                    end
                 end
-            elseif delta < 0 then
-                if IsShiftKeyDown() then
-                    self:ScrollToBottom()
-                else
-                    self:ScrollDown()
-                end
-            end
-        end)
+            end)
+        end
+    else
+        cf:EnableMouseWheel(false)
     end
 
     -- Hide scroll up/down/bottom buttons if requested
+    local bottomBtn = _G[fName .. "BottomButton"]
+    local upBtn = _G[fName .. "UpButton"]
+    local downBtn = _G[fName .. "DownButton"]
+
     if db.hideScrollButtons then
-        local bottomBtn = _G[fName .. "BottomButton"]
         if bottomBtn then
             bottomBtn:Hide()
-            bottomBtn:HookScript("OnShow", bottomBtn.Hide)
+            if not bottomBtn._bfcHooked then
+                bottomBtn._bfcHooked = true
+                bottomBtn:HookScript("OnShow", bottomBtn.Hide)
+            end
         end
-        local upBtn = _G[fName .. "UpButton"]
         if upBtn then
             upBtn:Hide()
-            upBtn:HookScript("OnShow", upBtn.Hide)
+            if not upBtn._bfcHooked then
+                upBtn._bfcHooked = true
+                upBtn:HookScript("OnShow", upBtn.Hide)
+            end
         end
-        local downBtn = _G[fName .. "DownButton"]
         if downBtn then
             downBtn:Hide()
-            downBtn:HookScript("OnShow", downBtn.Hide)
+            if not downBtn._bfcHooked then
+                downBtn._bfcHooked = true
+                downBtn:HookScript("OnShow", downBtn.Hide)
+            end
         end
+    else
+        if bottomBtn then bottomBtn:Show() end
+        if upBtn then upBtn:Show() end
+        if downBtn then downBtn:Show() end
     end
+
+    -- Custom Backdrop
+    self:ApplyFrameBackdrop(cf)
 
     -- Typography
     self:ApplyFrameTypography(cf)
@@ -539,12 +653,21 @@ function BFC:SetupChatFrames()
     if db.hideChatButtons then
         if ChatFrameMenuButton then
             ChatFrameMenuButton:Hide()
-            ChatFrameMenuButton:HookScript("OnShow", ChatFrameMenuButton.Hide)
+            if not ChatFrameMenuButton._bfcHooked then
+                ChatFrameMenuButton._bfcHooked = true
+                ChatFrameMenuButton:HookScript("OnShow", ChatFrameMenuButton.Hide)
+            end
         end
         if ChatFrameChannelButton then
             ChatFrameChannelButton:Hide()
-            ChatFrameChannelButton:HookScript("OnShow", ChatFrameChannelButton.Hide)
+            if not ChatFrameChannelButton._bfcHooked then
+                ChatFrameChannelButton._bfcHooked = true
+                ChatFrameChannelButton:HookScript("OnShow", ChatFrameChannelButton.Hide)
+            end
         end
+    else
+        if ChatFrameMenuButton then ChatFrameMenuButton:Show() end
+        if ChatFrameChannelButton then ChatFrameChannelButton:Show() end
     end
 
     -- Initialize all registered chat frames
@@ -591,14 +714,80 @@ function BFC:SetupChatFrames()
     end
 end
 
+function BFC:ApplyFrameBackdrop(chatFrame)
+    if not chatFrame then return end
+    local fName = chatFrame:GetName()
+    if not fName then return end
+
+    local db = self.db or {}
+
+    if db.enableCustomBackdrop then
+        if not chatFrame.bleakBackdrop then
+            local bd = CreateFrame("Frame", fName .. "BleakBackdrop", chatFrame, BACKDROP_TEMPLATE)
+            bd:SetPoint("TOPLEFT", chatFrame, "TOPLEFT", -6, 6)
+            bd:SetPoint("BOTTOMRIGHT", chatFrame, "BOTTOMRIGHT", 6, -6)
+            bd:SetFrameLevel(math.max(0, chatFrame:GetFrameLevel() - 1))
+            bd:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8X8",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true,
+                tileSize = 12,
+                edgeSize = 12,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 }
+            })
+            chatFrame.bleakBackdrop = bd
+        end
+
+        local th = db.theme or {}
+        local bgR = th.bgR or 0.08
+        local bgG = th.bgG or 0.10
+        local bgB = th.bgB or 0.13
+        local bgA = db.backdropAlpha or 0.65
+        local bR = th.borderR or 0.82
+        local bG = th.borderG or 0.68
+        local bB = th.borderB or 0.28
+        local bA = th.borderA or 0.85
+
+        chatFrame.bleakBackdrop:SetBackdropColor(bgR, bgG, bgB, bgA)
+        chatFrame.bleakBackdrop:SetBackdropBorderColor(bR, bG, bB, bA)
+        chatFrame.bleakBackdrop:Show()
+    else
+        if chatFrame.bleakBackdrop then
+            chatFrame.bleakBackdrop:Hide()
+        end
+    end
+end
+
 function BFC:ApplyFrameTypography(chatFrame)
+    if not chatFrame then return end
     local db = self.db or {}
     local fontName = db.font or "Nata Sans Regular"
     local fontSize = db.fontSize or 12
     local fontOutline = db.fontOutline or "OUTLINE"
+    if fontOutline == "NONE" or fontOutline == "None" then fontOutline = "" end
     local fontPath = self.FetchFont and self:FetchFont(fontName) or "Fonts\\FRIZQT__.TTF"
 
     chatFrame:SetFont(fontPath, fontSize, fontOutline)
+
+    local tab = _G[chatFrame:GetName() .. "Tab"]
+    if tab and tab.GetFontString and tab:GetFontString() then
+        local tabFs = tab:GetFontString()
+        tabFs:SetFont(fontPath, math.max(10, fontSize - 1), fontOutline)
+    end
+end
+
+function BFC:ApplyEditBoxTypography(editBox)
+    if not editBox then return end
+    local db = self.db or {}
+    local fontName = db.font or "Nata Sans Regular"
+    local fontSize = db.fontSize or 12
+    local fontOutline = db.fontOutline or "OUTLINE"
+    if fontOutline == "NONE" or fontOutline == "None" then fontOutline = "" end
+    local fontPath = self.FetchFont and self:FetchFont(fontName) or "Fonts\\FRIZQT__.TTF"
+
+    if editBox.SetFont then
+        editBox:SetFont(fontPath, fontSize, fontOutline)
+    end
 end
 
 --[[-----------------------------------------------------------------------------
@@ -836,6 +1025,7 @@ local function SkinEditBox(editBox)
     end
 
     editBox.bleakBackdrop:Show()
+    BFC:ApplyEditBoxTypography(editBox)
 end
 
 function BFC:PositionEditBox(editBox, chatFrame)
@@ -915,5 +1105,10 @@ function BFC:ApplySettings()
     self:SetupClassColoring()
     self:SetupChatFrames()
     self:SetupEditBox()
+
+    local allBoxes = GetAllChatEditBoxes()
+    for _, eb in ipairs(allBoxes) do
+        self:ApplyEditBoxTypography(eb)
+    end
 end
 

@@ -1,5 +1,14 @@
 # Changelog - Bleakfiber's Chat (Forever)
 
+## [1.0.5] - 2026-10-09
+
+### Added
+- **Channel Shortening**: Shortened channel prefixes across all global, group, and guide channels (`[1]`, `[G]`, `[O]`, `[P]`, `[PL]`, `[R]`, `[RL]`, `[I]`, `[IL]`, `[DG]`).
+- **Universal Class Coloring**: Class color names across all channels and player hyperlinks backed by dynamic roster and GUID caching.
+- **Typography & Fonts**: Full LibSharedMedia font face, size, and outline options applied across chat frames, tabs, and edit boxes.
+- **Window Backdrops**: Dark Slate & Gold custom backdrops with adjustable opacity slider for chat windows.
+- **Ergonomics & Clutter Control**: Mousewheel scrolling (Shift jumps to top/bottom, Ctrl scrolls 5 lines), screen unclamping, and clean Blizzard button suppression.
+
 ## [1.0.4] - 2026-10-09
 
 ### Added

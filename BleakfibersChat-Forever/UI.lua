@@ -1074,6 +1074,33 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         "Select font rendering outline."
     )
 
+    local hBackdrop = self:CreateSectionHeader(pLayout, "Chat Frame Backdrops & Styling", 16, 0)
+    local cbCustomBackdrop = self:CreateCheckbox(pLayout, "BFC_CbCustomBackdrop", "Enable Dark Slate & Gold Frame Backdrop", 16, 0,
+        function() return db.enableCustomBackdrop == true end,
+        function(v)
+            db.enableCustomBackdrop = v
+            if BFC.ApplySettings then BFC:ApplySettings() end
+        end,
+        "Displays a clean Dark Slate background and subtle gold border behind chat windows."
+    )
+    local slBackdropAlpha = self:CreateSlider(pLayout, "BFC_SlBackdropAlpha", "Backdrop Opacity", 0.1, 1.0, 0.05, 16, 0,
+        function() return db.backdropAlpha or 0.65 end,
+        function(v)
+            db.backdropAlpha = v
+            if BFC.ApplySettings then BFC:ApplySettings() end
+        end,
+        "%.2f",
+        "Controls the background opacity of the custom chat frame backdrop."
+    )
+    local cbEditBoxBackdrop = self:CreateCheckbox(pLayout, "BFC_CbEditBoxBackdrop", "Dark Slate & Gold EditBox Skinning", 16, 0,
+        function() return db.editBoxBackdrop ~= false end,
+        function(v)
+            db.editBoxBackdrop = v
+            if BFC.ApplySettings then BFC:ApplySettings() end
+        end,
+        "Applies Dark Slate & Gold backdrop skinning and focus glow effects to the chat entry box."
+    )
+
     local hClutter = self:CreateSectionHeader(pLayout, "Ergonomics & Clutter Suppression", 16, 0)
     local ddEditBoxPos = self:CreateDropdown(pLayout, "BFC_DdEditBoxPos", "EditBox Position", {
         { value = "BOTTOM", text = "Docked Below (Bottom)" },
@@ -1085,14 +1112,6 @@ function UI:BuildOptions(parentContainer, isMasterHub)
             if BFC.ApplySettings then BFC:ApplySettings() end
         end,
         "Anchor position of the chat text entry box."
-    )
-    local cbEditBoxBackdrop = self:CreateCheckbox(pLayout, "BFC_CbEditBoxBackdrop", "Dark Slate & Gold EditBox Skinning", 16, 0,
-        function() return db.editBoxBackdrop ~= false end,
-        function(v)
-            db.editBoxBackdrop = v
-            if BFC.ApplySettings then BFC:ApplySettings() end
-        end,
-        "Applies Dark Slate & Gold backdrop skinning and focus glow effects to the chat entry box."
     )
     local cbCopyButton = self:CreateCheckbox(pLayout, "BFC_CbCopyButton", "Show Copy Button on Chat Tabs", 16, 0,
         function() return db.showCopyButton ~= false end,
@@ -1168,6 +1187,38 @@ function UI:BuildOptions(parentContainer, isMasterHub)
             y = y - 52
         end
 
+        hBackdrop:ClearAllPoints()
+        hBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+        y = y - 26
+
+        if isWide then
+            cbCustomBackdrop:ClearAllPoints()
+            cbCustomBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            slBackdropAlpha:ClearAllPoints()
+            slBackdropAlpha:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
+            if cbCustomBackdrop.text then cbCustomBackdrop.text:SetWidth(colWidth - 32) end
+            y = y - 48
+
+            cbEditBoxBackdrop:ClearAllPoints()
+            cbEditBoxBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            if cbEditBoxBackdrop.text then cbEditBoxBackdrop.text:SetWidth(w - 48) end
+            y = y - 36
+        else
+            cbCustomBackdrop:ClearAllPoints()
+            cbCustomBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            if cbCustomBackdrop.text then cbCustomBackdrop.text:SetWidth(colWidth - 32) end
+            y = y - 36
+
+            slBackdropAlpha:ClearAllPoints()
+            slBackdropAlpha:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            y = y - 48
+
+            cbEditBoxBackdrop:ClearAllPoints()
+            cbEditBoxBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            if cbEditBoxBackdrop.text then cbEditBoxBackdrop.text:SetWidth(colWidth - 32) end
+            y = y - 36
+        end
+
         hClutter:ClearAllPoints()
         hClutter:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
         y = y - 26
@@ -1175,40 +1226,30 @@ function UI:BuildOptions(parentContainer, isMasterHub)
         if isWide then
             ddEditBoxPos:ClearAllPoints()
             ddEditBoxPos:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
-            cbEditBoxBackdrop:ClearAllPoints()
-            cbEditBoxBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y + 16)
-            if cbEditBoxBackdrop.text then cbEditBoxBackdrop.text:SetWidth(colWidth - 32) end
+            cbCopyButton:ClearAllPoints()
+            cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y + 16)
+            if cbCopyButton.text then cbCopyButton.text:SetWidth(colWidth - 32) end
             y = y - 50
 
-            cbCopyButton:ClearAllPoints()
-            cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
             cbMouseWheel:ClearAllPoints()
-            cbMouseWheel:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
-            if cbCopyButton.text then cbCopyButton.text:SetWidth(colWidth - 32) end
-            if cbMouseWheel.text then cbMouseWheel.text:SetWidth(colWidth - 32) end
-            y = y - 40
-
+            cbMouseWheel:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
             cbUnclamp:ClearAllPoints()
-            cbUnclamp:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
-            cbHideButtons:ClearAllPoints()
-            cbHideButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
+            cbUnclamp:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
+            if cbMouseWheel.text then cbMouseWheel.text:SetWidth(colWidth - 32) end
             if cbUnclamp.text then cbUnclamp.text:SetWidth(colWidth - 32) end
-            if cbHideButtons.text then cbHideButtons.text:SetWidth(colWidth - 32) end
             y = y - 40
 
+            cbHideButtons:ClearAllPoints()
+            cbHideButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
             cbHideScrollButtons:ClearAllPoints()
-            cbHideScrollButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
+            cbHideScrollButtons:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col2X, y)
+            if cbHideButtons.text then cbHideButtons.text:SetWidth(colWidth - 32) end
             if cbHideScrollButtons.text then cbHideScrollButtons.text:SetWidth(colWidth - 32) end
             y = y - 44
         else
             ddEditBoxPos:ClearAllPoints()
             ddEditBoxPos:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
             y = y - 50
-
-            cbEditBoxBackdrop:ClearAllPoints()
-            cbEditBoxBackdrop:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
-            if cbEditBoxBackdrop.text then cbEditBoxBackdrop.text:SetWidth(colWidth - 32) end
-            y = y - 36
 
             cbCopyButton:ClearAllPoints()
             cbCopyButton:SetPoint("TOPLEFT", pLayout, "TOPLEFT", col1X, y)
