@@ -2,7 +2,7 @@
 ## Title: |cff00c0ffBleakfiber's Chat|r - |cffffd100Forever|r
 ## Notes: A high-performance, minimalist chat suite featuring link clicking, persistent history, whisper popouts, and class colors for World of Warcraft Forever.
 ## Author: Bleakfiber
-## Version: 1.0.7
+## Version: 1.0.8
 ## SavedVariables: BleakfibersChatDB, BleakfibersChatHistory
 ## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3, LibSharedMedia-3.0, BleakfibersAddonConfigForever
 ## X-License: Restricted - Source Available (All Rights Reserved, No Derivatives)

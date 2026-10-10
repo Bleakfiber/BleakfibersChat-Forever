@@ -1,5 +1,11 @@
 # Changelog - Bleakfiber's Chat (Forever)
 
+## [1.0.8] - 2026-10-10
+
+### Fixed
+- **Backdrop Template Nil Error**: Fixed nil value error at `Core.lua:737` (`ApplyFrameBackdrop`) by scoping `BACKDROP_TEMPLATE` at module head and adding defensive mixin checks across all backdrop elements for modern/custom WoW clients.
+- **EditBox Up/Down Arrow Command History**: Resolved input history recall failure when pressing Up/Down arrows. Implemented dedicated keystroke tracking across `OnTextChanged` and `OnKeyDown`, real-time session buffer dispatch, and safe cursor navigation with unsubmitted draft restoration. Slash commands (such as `/silly`) and chat messages can now be immediately recalled with the Up arrow.
+
 ## [1.0.7] - 2026-10-09
 
 ### Fixed

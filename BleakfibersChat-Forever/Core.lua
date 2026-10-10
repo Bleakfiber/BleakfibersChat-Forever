@@ -8,6 +8,9 @@ local addonName, BFC = ...
 BFC = LibStub("AceAddon-3.0"):NewAddon(BFC, "BleakfibersChat", "AceEvent-3.0", "AceHook-3.0")
 _G["BleakfibersChatCore"] = BFC
 
+-- Backdrop template compatibility for Retail / Dragonflight / 3.3.5 / Ascension
+local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
+
 -- Class color hex cache
 local CLASS_COLORS = {}
 for classToken, color in pairs(RAID_CLASS_COLORS) do
@@ -34,6 +37,7 @@ local CHANNEL_REPLACEMENTS = {
 -- Session in-memory line buffer per frame for copy & export
 BFC.sessionHistory = {}
 BFC.playerClassCache = {}
+BFC.cmdHistory = {}
 
 function BFC:GetCharKey()
     local charName = UnitName("player")
@@ -59,12 +63,22 @@ local function GetAllChatEditBoxes()
         addBox(ChatEdit_GetActiveWindow())
     end
 
-    local numWindows = NUM_CHAT_WINDOWS or 7
+    local numWindows = NUM_CHAT_WINDOWS or 10
     for i = 1, numWindows do
         addBox(_G["ChatFrame" .. i .. "EditBox"])
         local cf = _G["ChatFrame" .. i]
         if cf and cf.editBox then
             addBox(cf.editBox)
+        end
+    end
+
+    if CHAT_FRAMES then
+        for _, name in ipairs(CHAT_FRAMES) do
+            addBox(_G[name .. "EditBox"])
+            local cf = _G[name]
+            if cf and cf.editBox then
+                addBox(cf.editBox)
+            end
         end
     end
 
@@ -80,6 +94,7 @@ function BFC:OnInitialize()
 
     -- Character key for persistent storage
     self.charKey = self:GetCharKey()
+    self.cmdHistory = self.cmdHistory or {}
 
     -- Ensure character storage table exists
     self.historyDB[self.charKey] = self.historyDB[self.charKey] or {
@@ -704,6 +719,7 @@ function BFC:SetupChatFrames()
                     BFC:InitChatFrame(cf)
                 end
             end
+            BFC:SetupEditBox()
         end)
         self._hookedOpenTemp = true
     end
@@ -716,6 +732,7 @@ function BFC:SetupChatFrames()
                     BFC:InitChatFrame(cf)
                 end
             end
+            BFC:SetupEditBox()
         end)
         self._hookedOpenNew = true
     end
@@ -731,17 +748,23 @@ function BFC:ApplyFrameBackdrop(chatFrame)
     if db.enableCustomBackdrop then
         if not chatFrame.bleakBackdrop then
             local bd = CreateFrame("Frame", fName .. "BleakBackdrop", chatFrame, BACKDROP_TEMPLATE)
+            if not bd.SetBackdrop and BackdropTemplateMixin then
+                Mixin(bd, BackdropTemplateMixin)
+                if bd.OnBackdropLoaded then bd:OnBackdropLoaded() end
+            end
             bd:SetPoint("TOPLEFT", chatFrame, "TOPLEFT", -6, 6)
             bd:SetPoint("BOTTOMRIGHT", chatFrame, "BOTTOMRIGHT", 6, -6)
             bd:SetFrameLevel(math.max(0, chatFrame:GetFrameLevel() - 1))
-            bd:SetBackdrop({
-                bgFile = "Interface\\Buttons\\WHITE8X8",
-                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                tile = true,
-                tileSize = 12,
-                edgeSize = 12,
-                insets = { left = 3, right = 3, top = 3, bottom = 3 }
-            })
+            if bd.SetBackdrop then
+                bd:SetBackdrop({
+                    bgFile = "Interface\\Buttons\\WHITE8X8",
+                    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                    tile = true,
+                    tileSize = 12,
+                    edgeSize = 12,
+                    insets = { left = 3, right = 3, top = 3, bottom = 3 }
+                })
+            end
             chatFrame.bleakBackdrop = bd
         end
 
@@ -755,8 +778,12 @@ function BFC:ApplyFrameBackdrop(chatFrame)
         local bB = th.borderB or 0.28
         local bA = th.borderA or 0.85
 
-        chatFrame.bleakBackdrop:SetBackdropColor(bgR, bgG, bgB, bgA)
-        chatFrame.bleakBackdrop:SetBackdropBorderColor(bR, bG, bB, bA)
+        if chatFrame.bleakBackdrop.SetBackdropColor then
+            chatFrame.bleakBackdrop:SetBackdropColor(bgR, bgG, bgB, bgA)
+        end
+        if chatFrame.bleakBackdrop.SetBackdropBorderColor then
+            chatFrame.bleakBackdrop:SetBackdropBorderColor(bR, bG, bB, bA)
+        end
         chatFrame.bleakBackdrop:Show()
     else
         if chatFrame.bleakBackdrop then
@@ -811,31 +838,23 @@ function BFC:ClearHistory()
         self.historyDB[charKey].editBox = {}
     end
     wipe(self.sessionHistory)
+    self.cmdHistory = {}
 
     local allBoxes = GetAllChatEditBoxes()
     for _, eb in ipairs(allBoxes) do
+        eb._bfcHistoryIndex = nil
+        eb._bfcHistoryDraft = nil
+        eb._bfcPendingText = nil
         if eb.ClearHistory then
             eb:ClearHistory()
         end
     end
 end
 
-function BFC:OnCommandSent(text)
+function BFC:OnCommandSent(text, editBox)
     if not text or text == "" then return end
     local db = self.db or {}
     if not db.enableEditBoxHistory then return end
-
-    local charKey = self:GetCharKey()
-    local charStore = self.historyDB and self.historyDB[charKey]
-    if not charStore then return end
-
-    charStore.editBox = charStore.editBox or {}
-    local list = charStore.editBox
-
-    -- Prevent duplicate consecutive entries
-    if #list > 0 and list[#list] == text then
-        return
-    end
 
     -- Ignore passwords/secrets
     local lower = text:lower()
@@ -843,11 +862,80 @@ function BFC:OnCommandSent(text)
         return
     end
 
-    table.insert(list, text)
+    local charKey = self:GetCharKey()
+    local charStore = self.historyDB and self.historyDB[charKey]
+    if charStore then
+        charStore.editBox = charStore.editBox or {}
+        local list = charStore.editBox
+        if #list == 0 or list[#list] ~= text then
+            table.insert(list, text)
+            local maxLines = db.editBoxHistoryLines or 50
+            while #list > maxLines do
+                table.remove(list, 1)
+            end
+        end
+    end
 
-    local maxLines = db.editBoxHistoryLines or 50
-    while #list > maxLines do
-        table.remove(list, 1)
+    -- Update session command history
+    self.cmdHistory = self.cmdHistory or {}
+    if #self.cmdHistory == 0 or self.cmdHistory[#self.cmdHistory] ~= text then
+        table.insert(self.cmdHistory, text)
+        local maxLines = db.editBoxHistoryLines or 50
+        while #self.cmdHistory > maxLines do
+            table.remove(self.cmdHistory, 1)
+        end
+    end
+
+    -- Push to native Blizzard C++ history lines on all chat edit boxes
+    local allBoxes = GetAllChatEditBoxes()
+    for _, box in ipairs(allBoxes) do
+        if box.AddHistoryLine then
+            box:AddHistoryLine(text)
+        end
+    end
+end
+
+function BFC:NavigateEditBoxHistory(editBox, key)
+    local db = self.db or {}
+    if not db.enableEditBoxHistory then return end
+
+    local history = self.cmdHistory
+    if not history or #history == 0 then return end
+
+    if key == "UP" then
+        if not editBox._bfcHistoryIndex then
+            editBox._bfcHistoryDraft = editBox:GetText() or ""
+            editBox._bfcHistoryIndex = #history
+        else
+            editBox._bfcHistoryIndex = editBox._bfcHistoryIndex - 1
+            if editBox._bfcHistoryIndex < 1 then
+                editBox._bfcHistoryIndex = 1
+            end
+        end
+
+        local text = history[editBox._bfcHistoryIndex]
+        if text then
+            editBox:SetText(text)
+            editBox:SetCursorPosition(string.len(text))
+        end
+    elseif key == "DOWN" then
+        if not editBox._bfcHistoryIndex then
+            return
+        end
+
+        editBox._bfcHistoryIndex = editBox._bfcHistoryIndex + 1
+        if editBox._bfcHistoryIndex > #history then
+            editBox:SetText(editBox._bfcHistoryDraft or "")
+            editBox:SetCursorPosition(string.len(editBox._bfcHistoryDraft or ""))
+            editBox._bfcHistoryIndex = nil
+            editBox._bfcHistoryDraft = nil
+        else
+            local text = history[editBox._bfcHistoryIndex]
+            if text then
+                editBox:SetText(text)
+                editBox:SetCursorPosition(string.len(text))
+            end
+        end
     end
 end
 
@@ -862,6 +950,14 @@ function BFC:RestoreEditBoxHistory()
     local list = charStore.editBox
     if #list == 0 then return end
 
+    -- Seed in-memory session history if not already populated
+    self.cmdHistory = self.cmdHistory or {}
+    if #self.cmdHistory == 0 then
+        for _, line in ipairs(list) do
+            table.insert(self.cmdHistory, line)
+        end
+    end
+
     local maxLines = db.editBoxHistoryLines or 50
     local allBoxes = GetAllChatEditBoxes()
     for _, eb in ipairs(allBoxes) do
@@ -869,7 +965,7 @@ function BFC:RestoreEditBoxHistory()
             eb:SetHistoryLines(math.max(#list + 20, maxLines))
         end
         if eb.SetAltArrowKeyMode then
-            eb:SetAltArrowKeyMode(false)
+            eb:SetAltArrowKeyMode(true)
         end
         if eb.AddHistoryLine then
             for _, line in ipairs(list) do
@@ -973,8 +1069,6 @@ end
 --[[-----------------------------------------------------------------------------
     EditBox Modernization: Docking, Sticky Channels & Skinning
 -------------------------------------------------------------------------------]]
-local BACKDROP_TEMPLATE = BackdropTemplateMixin and "BackdropTemplate" or nil
-
 local function SkinEditBox(editBox)
     if not editBox then return end
     local name = editBox:GetName()
@@ -1003,29 +1097,39 @@ local function SkinEditBox(editBox)
 
     if not editBox.bleakBackdrop then
         local bd = CreateFrame("Frame", nil, editBox, BACKDROP_TEMPLATE)
+        if not bd.SetBackdrop and BackdropTemplateMixin then
+            Mixin(bd, BackdropTemplateMixin)
+            if bd.OnBackdropLoaded then bd:OnBackdropLoaded() end
+        end
         bd:SetAllPoints(editBox)
         bd:SetFrameLevel(math.max(0, editBox:GetFrameLevel() - 1))
-        bd:SetBackdrop({
-            bgFile = "Interface\\Buttons\\WHITE8X8",
-            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-            tile = true,
-            tileSize = 12,
-            edgeSize = 12,
-            insets = { left = 3, right = 3, top = 3, bottom = 3 }
-        })
-        bd:SetBackdropColor(0.08, 0.10, 0.13, 0.94)
-        bd:SetBackdropBorderColor(0.82, 0.68, 0.28, 0.85)
+        if bd.SetBackdrop then
+            bd:SetBackdrop({
+                bgFile = "Interface\\Buttons\\WHITE8X8",
+                edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+                tile = true,
+                tileSize = 12,
+                edgeSize = 12,
+                insets = { left = 3, right = 3, top = 3, bottom = 3 }
+            })
+        end
+        if bd.SetBackdropColor then
+            bd:SetBackdropColor(0.08, 0.10, 0.13, 0.94)
+        end
+        if bd.SetBackdropBorderColor then
+            bd:SetBackdropBorderColor(0.82, 0.68, 0.28, 0.85)
+        end
         editBox.bleakBackdrop = bd
 
         editBox:SetTextInsets(8, 8, 0, 0)
 
         editBox:HookScript("OnEditFocusGained", function(self)
-            if self.bleakBackdrop then
+            if self.bleakBackdrop and self.bleakBackdrop.SetBackdropBorderColor then
                 self.bleakBackdrop:SetBackdropBorderColor(1.00, 0.82, 0.25, 1.00)
             end
         end)
         editBox:HookScript("OnEditFocusLost", function(self)
-            if self.bleakBackdrop then
+            if self.bleakBackdrop and self.bleakBackdrop.SetBackdropBorderColor then
                 self.bleakBackdrop:SetBackdropBorderColor(0.50, 0.42, 0.20, 0.85)
             end
         end)
@@ -1073,30 +1177,80 @@ function BFC:SetupEditBox()
         self:PositionEditBox(eb, parentCf)
         SkinEditBox(eb)
 
-        -- Allow Up / Down arrow history navigation without holding Alt key
-        if eb.SetAltArrowKeyMode then
-            eb:SetAltArrowKeyMode(false)
-        end
         if eb.SetHistoryLines then
             eb:SetHistoryLines(maxHistory)
         end
+        -- Keep native AltArrowKeyMode true so Blizzard's native widget does not consume
+        -- plain Up/Down arrow keystrokes, letting our Lua hook cycle history cleanly
+        if eb.SetAltArrowKeyMode then
+            eb:SetAltArrowKeyMode(true)
+        end
 
         if not eb._bfcHooked then
-            -- Re-apply position and arrow key mode when edit box shows
+            -- Re-apply position and key mode when edit box shows
             eb:HookScript("OnShow", function(self)
                 local cf = self.chatFrame or SELECTED_CHAT_FRAME or ChatFrame1
                 BFC:PositionEditBox(self, cf)
                 if self.SetAltArrowKeyMode then
-                    self:SetAltArrowKeyMode(false)
+                    self:SetAltArrowKeyMode(true)
                 end
             end)
 
-            -- Capture command history when Enter is pressed
-            eb:HookScript("OnEnterPressed", function(self)
+            -- Track typed text so that it is never lost even if cleared before OnEnterPressed hook
+            eb:HookScript("OnTextChanged", function(self, userInput)
                 local text = self:GetText()
                 if text and text ~= "" then
-                    BFC:OnCommandSent(text)
+                    self._bfcPendingText = text
                 end
+            end)
+
+            -- Handle Up / Down arrow history recall and Enter key capture
+            eb:HookScript("OnKeyDown", function(self, key)
+                if key == "ENTER" then
+                    local text = self:GetText()
+                    if not text or text == "" then
+                        text = self._bfcPendingText
+                    end
+                    if text and text ~= "" then
+                        BFC:OnCommandSent(text, self)
+                    end
+                    self._bfcPendingText = nil
+                    self._bfcHistoryIndex = nil
+                    self._bfcHistoryDraft = nil
+                elseif key == "ESCAPE" then
+                    self._bfcPendingText = nil
+                    self._bfcHistoryIndex = nil
+                    self._bfcHistoryDraft = nil
+                elseif key == "UP" or key == "DOWN" then
+                    if not IsAltKeyDown() then
+                        BFC:NavigateEditBoxHistory(self, key)
+                    end
+                end
+            end)
+
+            -- Fallback EnterPressed hook
+            eb:HookScript("OnEnterPressed", function(self)
+                local text = self:GetText()
+                if not text or text == "" then
+                    text = self._bfcPendingText
+                end
+                if text and text ~= "" then
+                    BFC:OnCommandSent(text, self)
+                end
+                self._bfcPendingText = nil
+                self._bfcHistoryIndex = nil
+                self._bfcHistoryDraft = nil
+            end)
+
+            -- Reset navigation cursor when edit box closes or loses focus
+            eb:HookScript("OnEscapePressed", function(self)
+                self._bfcPendingText = nil
+                self._bfcHistoryIndex = nil
+                self._bfcHistoryDraft = nil
+            end)
+            eb:HookScript("OnEditFocusLost", function(self)
+                self._bfcHistoryIndex = nil
+                self._bfcHistoryDraft = nil
             end)
 
             eb._bfcHooked = true
