@@ -1190,20 +1190,6 @@ function BFC:PositionEditBox(editBox, chatFrame)
     end
 end
 
-function BFC:SetupEditBox()
-    local db = self.db or {}
-
-    -- Sticky Channels Configuration
-    local stickyVal = (db.stickyChannels ~= false) and 1 or 0
-    if ChatTypeInfo then
-        local stickyList = { "SAY", "PARTY", "RAID", "GUILD", "OFFICER", "WHISPER", "CHANNEL" }
-        for _, t in ipairs(stickyList) do
-            if ChatTypeInfo[t] then
-                ChatTypeInfo[t].sticky = stickyVal
-            end
-        end
-    end
-
 function BFC:HookEditBox(eb)
     if not eb or eb._bfcHooked then return end
 
