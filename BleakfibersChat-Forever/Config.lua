@@ -9,7 +9,7 @@ BFC = BFC or {}
 _G["BleakfibersChat"] = BFC
 
 BFC.addonName = addonName
-BFC.version = "1.0.5"
+BFC.version = "1.0.6"
 
 --[[-----------------------------------------------------------------------------
     SavedVariables Schema & Default Settings
@@ -178,17 +178,19 @@ end
     Soft Register with BleakfibersAddonConfigForever (Master Hub)
 -------------------------------------------------------------------------------]]
 function BFC:RegisterWithMasterConfig()
-    if not (BleakfibersAddonConfigForever and BleakfibersAddonConfigForever.RegisterModule) then
+    local BAC = _G["BleakfibersAddonConfigForever"] or _G["BleakfibersAddonConfig"]
+    if not (BAC and BAC.RegisterModule) then
         return
     end
 
-    BleakfibersAddonConfigForever:RegisterModule("BleakfibersChat", {
+    BAC:RegisterModule("BleakfibersChat", {
         id = "BleakfibersChat",
-        name = "Chat",
+        name = "Bleakfiber's Chat",
         sidebarName = "Chat",
         version = self.version,
         author = "Bleakfiber",
         isBleakfiber = true,
+        description = "High-performance, minimalist chat suite featuring link clicking, persistent history, whisper popouts, and class colors.",
         db = self.db,
         getDB = function() return BFC.db end,
         buildUI = function(container, isMasterHub)
@@ -234,8 +236,14 @@ function BFC:RegisterWithMasterConfig()
 end
 
 function BFC:OpenSettings()
-    if BleakfibersAddonConfigForever and BleakfibersAddonConfigForever.OpenToModule then
-        BleakfibersAddonConfigForever:OpenToModule("BleakfibersChat")
+    local BAC = _G["BleakfibersAddonConfigForever"] or _G["BleakfibersAddonConfig"]
+    if BAC and (BAC.OpenToModule or BAC.SelectModule) and not IsShiftKeyDown() then
+        if BAC.OpenToModule then
+            BAC:OpenToModule("BleakfibersChat")
+        elseif BAC.SelectModule then
+            if BAC.ShowUI then BAC:ShowUI() end
+            BAC:SelectModule("BleakfibersChat")
+        end
     elseif self.UI and self.UI.ToggleStandaloneWindow then
         self.UI:ToggleStandaloneWindow()
     else

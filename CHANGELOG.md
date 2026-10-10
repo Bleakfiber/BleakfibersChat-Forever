@@ -1,5 +1,12 @@
 # Changelog - Bleakfiber's Chat (Forever)
 
+## [1.0.6] - 2026-10-09
+
+### Added
+- **Suite & Master Hub Integration**: Full soft-hook registration with `BleakfibersAddonConfigForever` (`BleakfibersAddonConfig`), including dynamic live settings refresh, profile syncing, and `ADDON_LOADED` auto-detection.
+- **Dual-Mode Settings Panel**: Standalone Dark Slate & Gold window with smooth 2-column dynamic reflow (`UI:BuildOptions`) and clean embedding when opened through the Master Hub.
+- **Profiles Management**: Non-destructive profile creation, cloning, deletion, and reset.
+
 ## [1.0.5] - 2026-10-09
 
 ### Added

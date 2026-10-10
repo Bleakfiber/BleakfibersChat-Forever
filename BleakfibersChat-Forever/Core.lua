@@ -97,6 +97,13 @@ function BFC:OnEnable()
     self:SetupChatHistory()
 
     self:RegisterEvent("PLAYER_ENTERING_WORLD")
+    self:RegisterEvent("ADDON_LOADED")
+end
+
+function BFC:ADDON_LOADED(event, loadedAddon)
+    if loadedAddon == "BleakfibersAddonConfig-Forever" or loadedAddon == "BleakfibersAddonConfig" or loadedAddon == "BleakfibersAddonConfigForever" then
+        self:RegisterWithMasterConfig()
+    end
 end
 
 --[[-----------------------------------------------------------------------------
